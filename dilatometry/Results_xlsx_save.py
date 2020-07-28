@@ -3,8 +3,11 @@
 Created on Wed Dec 30 09:07:26 2015
 
 Cross platform (Windows and Linux compatible)
+
 @author: nasseh
 """
+#This version is base on Results_xlsx_v4 in the old version control system.
+
 from collections import OrderedDict
 global sr, reg_order, interval
 #this sript saves the results of calculation in the xlsx format
