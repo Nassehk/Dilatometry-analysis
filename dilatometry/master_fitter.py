@@ -1,4 +1,10 @@
 """
+Change log:
+
+Master_fitter _v3.py
+The code is ported to python 3.
+TODO: update code with object orientation for phases.
+
 Master_fitter_v2.52.py
 Volume fraction calculations are done and results are stored in the excel file.
 Martensite calculations is updated. The results with regard to martensite are more accurate.
@@ -75,7 +81,7 @@ Important notice:
     Before you run the code for the first time you need to compile the C shared library.
     These functions are all gathered in master_fitter_util.so which is created 
     using Cython tool from the source code master_fitter_utils.pyx. compile by typing 
-    "python master_fitter_utils.py build_ext --inplace" in a terminal that is 
+    "python setup_master_fitter_utils.py build_ext --inplace" in a terminal that is 
     opened in the master_fitter_utils.py directory.
     
 
@@ -92,7 +98,7 @@ email the author at: khodaie@ualberta.ca or nassehk@gmail.com.
 This code is distributed under MIT license. Update, upgrade, fix and share.
 """
 __author__= "Nasseh Khodaie"
-__version__=2.52
+__version__=3.00
 #import cProfile 
 #def main():
 import csv
@@ -109,18 +115,18 @@ from numpy import sqrt
 #from numba import jit, float64, vectorize 
 #if sys.platform[0:3] != 'lin':
 #    import winsound
-from Results_xlsx_save_v4 import saver
+from Results_xlsx_save import saver
 #import data_set_conditioner_V2
-import data_set_conditioner_V4
+import data_set_conditioner
 from openpyxl import load_workbook as lw
 from scipy.interpolate import interp1d
 import multiprocessing as mp
 from subprocess import call
+from master_fitter_utils import Valpha,Vbainite,VCement
+
 start=time.time()
 clear = lambda: os.system('clear'if sys.platform[:5]==('linux' or 'darwi') else 'cls')
 clear()
-#from master_fitter_utils import Valpha,Vbainite,VCement
-from master_fitter_utils import Valpha,Vbainite,VCement
 
 
 # global variable are solver settings that are shared between V10 and V10_plot functions.
@@ -131,7 +137,7 @@ global err_maximum_transformation_WF, Bs_master_dic, Ms_master_dic, MF_dic
 #solver settings
 
 optimize='no'# It tells the program to optimize or just plot usinong the parameters provided.yes / no
-show_plots='yes'
+show_plots='no'
 open_excel_result='no'
 interval=4
 
@@ -202,42 +208,14 @@ optimized_param_bounds={'a0_gama':     (3.63e-10*0.98,3.63e-10*1.02),
 #params are used by Nelde-Mead only 
 
 
-
-a0_gama =     3.630354505175200875243544068702e-10
-a0_alpha=     2.862287794587018444711883712837e-10
-CTE_alpha_a=  0.000000000000000000000000000000e+00
-CTE_alpha_b=  5.086220388680368286626575489474e-09
-CTE_alpha_c=  1.345573511002759915929864048545e-05
-c_wf_for_cte= 2.447760606068423959447155624503e-04
-c_wf_for_a0=  2.738195400762507402673061141394e-12
-
-a0_gama =     3.630354505175200875243544068702e-10
-a0_alpha=     2.863808486285750344751009173396e-10
-CTE_alpha_a=  0.000000000000000000000000000000e+00
-CTE_alpha_b=  5.260490284101996830735676734941e-09
-CTE_alpha_c=  1.417585955437864798662356280445e-05
-c_wf_for_cte= 2.440383396086537770748592368619e-04
-c_wf_for_a0=  2.759544688049151044809299744387e-12
-
 #interval=2
 a0_gama =     3.630354505175200875243544068702e-10
-a0_alpha=     2.862163001016279574396956530903e-10
+a0_alpha=     2.862496784948004707531459963016e-10
 CTE_alpha_a=  0.000000000000000000000000000000e+00
-CTE_alpha_b=  5.143110171031105623327093367579e-09
-CTE_alpha_c=  1.364639614049128280091460058143e-05
-c_wf_for_cte= 2.591517372912589692660056961415e-04
-c_wf_for_a0=  2.794418210190586753445084794864e-12
-
-## interval=1
-#a0_gama =     3.630354505175200875243544068702e-10
-#a0_alpha=     2.862814711763634321364442884752e-10
-#CTE_alpha_a=  0.000000000000000000000000000000e+00
-#CTE_alpha_b=  4.909754767826242843309845467672e-09
-#CTE_alpha_c=  1.267018262622261181855713718658e-05
-#c_wf_for_cte= 2.590696835538086172795457784446e-04
-#c_wf_for_a0=  2.905692205197672550365297405356e-12
-
-#################################   
+CTE_alpha_b=  5.259052569948893497158337768937e-09
+CTE_alpha_c=  1.303580639054562249575831833770e-05
+c_wf_for_cte= 2.591159702736662369566833508117e-04
+c_wf_for_a0=  2.996310242996993135602471934982e-12
 
 
 #################################
@@ -285,7 +263,7 @@ chemistry0_temp=dict(zip(elements,amount0_wp))# this is used in some calculation
 #def molar_fraction(elements,amounts_wp,req
 
 for elm in molar_weight.keys():
-    if chemistry0.has_key(elm):
+    if elm in chemistry0.keys():
         pass
     else:
         chemistry0.update(dict(zip([elm],[0])))
@@ -294,7 +272,7 @@ CSLA=lw('C_solubility_limit_austenite.xlsx')
 ws=CSLA.active
 T_CSLA=[]
 X_CSLA=[]
-for i in xrange(2,int(ws.max_row),1):
+for i in range(2,int(ws.max_row),1):
     #print "Row # in carbon solubility =" , i
     X_CSLA.append(float(ws.cell(row=i, column=1).value))
     T_CSLA.append(float(ws.cell(row=i, column=2).value))
@@ -324,7 +302,7 @@ def Solubility_aus_cement(T):#This function is not vectorizable because of the i
 #plt.figure(87)
 #plt.plot(T_CSLA,X_CSLA,'o')
 CSLA=np.zeros(len(T_CSLA))
-for i in xrange(len(T_CSLA)):
+for i in range(len(T_CSLA)):
     CSLA[i]=Solubility_aus_cement(T_CSLA[i])
 
 plt.figure(figsize=(8,6))
@@ -372,14 +350,15 @@ def MF_to_WP_generator(local_chem):
 
     C_wp=np.linspace(chemistry0['c'],6.0,200)
     C_MF=[]
-    for i in xrange(len(C_wp)):
-        if local_chem.has_key('fe'): local_chem.pop('fe')
+    for i in range(len(C_wp)):
+        if 'fe' in local_chem.keys(): 
+            local_chem.pop('fe')
         local_chem['c']=C_wp[i]
-        elem,amo_wp=local_chem.keys(),local_chem.values()
+        elem,amo_wp=list(local_chem.keys()),list(local_chem.values())
         C_MF.append(molar_fraction(elem,amo_wp,'c'))
     MF_to_WP=P.polyfit(C_MF,C_wp,4)
     return MF_to_WP
-MF_to_WP=MF_to_WP_generator(chemistry0_temp) 
+MF_to_WP=MF_to_WP_generator(chemistry0_temp)
             
 def mf_to_wp(MF):
     try:#This will allow handelling numpy arrays
@@ -470,7 +449,7 @@ def corr_fact_l0(x):
     if L0_correction_method==3:
         err=(5+abs(strain_at_normalizing_temp_master[m]-strain_at_normalizing_T_avr+x/file_list[m][5]))**5-5**5
     else:
-        print "L0_correction_method not supported. Pick a supported number."
+        print ("L0_correction_method not supported. Pick a supported number.")
     return err
 
 L0_correction=[]
@@ -484,13 +463,13 @@ if correct_L0.lower()=='yes':
         current_dldT=P.polyfit(temp_analysis_aus,dil_analysis_aus,1)[1] 
         
         x0=0#,a0_gama,CTE_0_gama,CTE_alpha_b,CTE_alpha_a]
-        for i in xrange(5):
+        for i in range(5):
             res = scipy.optimize.minimize(corr_fact_l0,x0, method='Nelder-Mead')
             x0= res.x
-            print x0
+            print (x0)
         L0_correction.append(x0[0])
     L0_correction=np.array(L0_correction)
-    print L0_correction
+    print (L0_correction)
 else:
     L0_correction=np.zeros(len(file_list))
 CTE_eq_order=1 #Highest power in the CTE polinomial
@@ -511,7 +490,7 @@ temperature_temp=[]
 plt.figure(figsize=(8,6)) 
 plt.title("CTE product") 
 for i in range(len(file_list)):
-    print i , "   " , i
+    print (i , "   " , i)
     temp=np.arange(np.round(temp_master[i][int(file_list[i][4])]),np.round(temp_master[i][int(file_list[i][3])]))
     CTE=P.polyval(temp,CTE_product_master[i])     
     plt.plot(temp,1e5*CTE,'.',label=file_list[i][0])
@@ -519,7 +498,7 @@ for i in range(len(file_list)):
     temperature_temp=temperature_temp+list(temp)
     
 CTE_product_avr_coef=P.polyfit(temperature_temp,CTE_temp,CTE_eq_order)
-plt.plot(range(100,500),1e5*P.polyval(range(100,500),CTE_product_avr_coef),"--",label='Average CTE')
+plt.plot(range(100,500),1e5*P.polyval(list(range(100,500)),CTE_product_avr_coef),"--",label='Average CTE')
 plt.legend()
 plt.xlabel('Temperature $(\degree C)$')
 plt.ylabel('CTE$ \\times 10^5$ $({\degree C}^{-1})$')
@@ -590,7 +569,7 @@ def Bainite_ss_factor(T,C): #using relaxation observed in isothermal experiments
             if BSSF<0: BSSF=0
             if BSSF>1: BSSF=1
     else: 
-        print "SSF_method must be either general or custom"
+        print ("SSF_method must be either general or custom")
     return BSSF
 
 def C_in_alpha(T): #Mole fraction of C in alpha using thermocalc under para equilibrium
@@ -702,14 +681,14 @@ def Fitter(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,
         return err
 
     x0=[3e22]#initial estimate of x0 (here it represents N_t) is very important. Too big of number will give error.
-    for i in xrange(5):
+    for i in range(5):
         res = scipy.optimize.minimize(fundamental_parameters,x0, method='Nelder-Mead')
         x0= res.x
     N_total=x0[0]
     
     
     
-    print 'N_total of %s=%s'%(filename,N_total)
+    print ('N_total of %s=%s'%(filename,N_total))
 #    print 'CTE_0_gama of %s=%s'%(filename,CTE_0_gama)
 #    print
  
@@ -722,7 +701,7 @@ def Fitter(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,
     num_of_analized_points=len(time_fit)
 
     n=sr
-    for i in xrange(num_of_analized_points):
+    for i in range(num_of_analized_points):
         #print'i= ',i
         time_fit[i]=time_analysis[n]
         coef1= P.polyfit(time_analysis[n-sr:n+sr],temp_analysis[n-sr:n+sr],reg_order)
@@ -738,7 +717,7 @@ def Fitter(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,
         previ_cem_v=0.0
         current_step_cem=0.0
         dn_cem=0.0
-        for j in xrange(i-1): #This for loop calculates volume of all the previous steps. i-1 is correct
+        for j in range(i-1): #This for loop calculates volume of all the previous steps. i-1 is correct
             if ID_dn[j][0:2]=="PF":
                 previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Valpha(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte,c_wf_for_a0, MF_to_WP)
             if ID_dn[j][0:2]==("BF"):
@@ -773,7 +752,7 @@ def Fitter(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,
         previ_cem_v=0.0
         current_step_cem=0.0
         dn_cem=0.0
-        for j in xrange(i-1): #This for loop calculates volume of all the previous steps. i-1 is correct
+        for j in range(i-1): #This for loop calculates volume of all the previous steps. i-1 is correct
             if ID_dn[j][0:2]=="PF":
                 previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Valpha(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
             if ID_dn[j][0:2]==("BF"):
@@ -816,10 +795,10 @@ def Fitter(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,
     N_product=np.zeros(len(temp_fit))
 #    N_prod=np.zeros(len(temp_fit))
 
-    for j in xrange(1):
+    for j in range(1):
         #print '******************'
         i=1 # start filling dn_alpha from the third element since the first two should be zero. the first
-        for i in xrange(1,num_of_analized_points):
+        for i in range(1,num_of_analized_points):
             T=(temp_fit[i-1]+temp_fit[i])/2
 
 #            print i, "out of", len(temp_fit)-1 ,"points completed"
@@ -859,7 +838,7 @@ def Fitter(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,
                 ID_dn.append("PF")
                 C_dn[i-1]=C_in_alpha((temp_fit[i-1]+temp_fit[i])/2)
             else:
-                print "There is a problem with ID_dn"
+                print ("There is a problem with ID_dn")
                 quit()
 
             res=scipy.optimize.minimize(expm_l_individual_err, dn_alpha[i-1], method='nelder-mead', options={})
@@ -896,7 +875,7 @@ def Fitter(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,
     err_end_fit=(5+sum(abs((dil_fit[len(temp_fit)-no_end_points:]+L0)-simulated_l[len(temp_fit)-no_end_points:]))/L0)**end_fit_WF-5**end_fit_WF
     err_end_fraction=float(0.0)# this issues error if end fraction goes above 1
     Numer_of_high_point=int(0)
-    for i in xrange(len(temp_fit)//3,len(temp_fit)): 
+    for i in range(len(temp_fit)//3,len(temp_fit)): 
 #        print i
 #        print "len(temp_fit)",len(temp_fit)
         if N_product[i]>N_total:
@@ -917,7 +896,7 @@ def Fitter(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,
     output.put([total_cost,Bs_temp_dic,Ms_temp_dic,MF_temp_dic,C_in_alpha_temp_dic])#+err_pure_phase)#+err_gama_fit+err_alpha_fit)
 
 def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,c_wf_for_cte, c_wf_for_a0):
-    print '----------V10_plot-------------'
+    print ('----------V10_plot-------------')
 
 #    a0_alpha=0.28630e-9 # measured using from XRD at 20C. Should not be concidered in parameter finding.
     global sr, reg_order, interval, Bs_model, end_fit_WF, overal_fit_WF
@@ -958,7 +937,7 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
     dil_analysis_fer=dilation[row_min_fer:row_max_fer+1]
     temp_analysis_fer=temperature[row_min_fer:row_max_fer+1]
     CTE_product_coef=P.polyder(P.polyfit(temp_analysis_fer,dil_analysis_fer,3))/L0
-    print CTE_product_coef
+    print (CTE_product_coef)
 #    print "CTE_product for",file_list[k][0],'=', CTE_product  
     #determin the range of interest for fraction transformed calculation.
     row_min= row_min_aus
@@ -1009,18 +988,18 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
         return err
 
     x0=[8.5e22]#,a0_gama,CTE_0_gama,CTE_alpha_b,CTE_alpha_a]
-    for i in xrange(5):
+    for i in range(5):
         res = scipy.optimize.minimize(fundamental_parameters,x0, method='Nelder-Mead')
         x0= res.x
     N_total=x0[0]
     
-    print 'N_total of %s=%s'%(filename,N_total)
-    print 'CTE_0_gama of %s=%s'%(filename,CTE_0_gama)
+    print ('N_total of %s=%s'%(filename,N_total))
+    print ('CTE_0_gama of %s=%s'%(filename,CTE_0_gama))
     print
 #    raw_input('Hit enter to begin fitting points')
 
     simulated_aus=np.zeros(len(temp_analysis))
-    for i in xrange (0, len(temp_analysis)):
+    for i in range (0, len(temp_analysis)):
         simulated_aus[i]= (N_total/4*Vgama_new(CTE_0_gama,C0,temp_analysis[i]))**(1/3.0)
 
     plt.figure(7,figsize=(8,6))
@@ -1041,7 +1020,7 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
     num_of_analized_points=len(time_fit)
 
     n=sr
-    for i in xrange(num_of_analized_points):
+    for i in range(num_of_analized_points):
         #print'i= ',i
         time_fit[i]=time_analysis[n]
         coef1= P.polyfit(time_analysis[n-sr:n+sr],temp_analysis[n-sr:n+sr],reg_order)
@@ -1057,7 +1036,7 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
         previ_cem_v=0.0
         current_step_cem=0.0
         dn_cem=0.0
-        for j in xrange(i-1): #This for loop calculates volume of all the previous steps. i-1 is correct
+        for j in range(i-1): #This for loop calculates volume of all the previous steps. i-1 is correct
             if ID_dn[j][0:2]=="PF":
                 previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Valpha(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte,c_wf_for_a0, MF_to_WP)
 
@@ -1097,7 +1076,7 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
         previ_cem_v=0.0
         current_step_cem=0.0
         dn_cem=0.0
-        for j in xrange(i-1): #This for loop calculates volume of all the previous steps. i-1 is correct
+        for j in range(i-1): #This for loop calculates volume of all the previous steps. i-1 is correct
             if ID_dn[j][0:2]=="PF":
                 previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Valpha(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
 
@@ -1147,10 +1126,10 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
     Vol_dn_cem_at_20=np.zeros(num_of_analized_points-1)
     Vol_transformed=np.zeros(num_of_analized_points-1)
     
-    for j in xrange(1):
+    for j in range(1):
         #print '******************'
 #        i=1 # start filling dn_alpha from the third element since the first two should be zero. the first
-        for i in xrange(1,num_of_analized_points):
+        for i in range(1,num_of_analized_points):
             ii=i-1
             T=(temp_fit[ii]+temp_fit[i])/2
 #            print i, "out of", num_of_analized_points-1 ,"points completed"
@@ -1188,7 +1167,7 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
                 ID_dn.append("PF")
                 C_dn[i-1]=C_in_alpha((temp_fit[i-1]+temp_fit[i])/2)
             else:
-                print "There is a problem with ID_dn"
+                print ("There is a problem with ID_dn")
                 quit()
             res=scipy.optimize.minimize(expm_l_individual_err, dn_alpha[ii], method='Nelder-Mead', options={})
             K=res.x
@@ -1220,18 +1199,18 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
             C_total_in_gama=(N_total-N_product[i])*L(C_in_aus_molefraction[i])
             Initial_C=N_total*L(C0)
             C_balance=(C_total_in_ferrite+C_total_in_cementite+C_total_in_gama)/Initial_C            
-            print "    T is" , temp_fit[i]
-            print "    Current product is ", ID_dn[ii]
-            print "    Fraction transformed is ", "%.3f" %(N_product[i]/N_total)
-            print "    C balance (should be 1)= ", C_balance
+            print ("    T is" , temp_fit[i])
+            print ("    Current product is ", ID_dn[ii])
+            print ("    Fraction transformed is ", "%.3f" %(N_product[i]/N_total))
+            print ("    C balance (should be 1)= ", C_balance)
 #            print "    dil_fit = ", dil_fit[i]
-            print "----------------------------------"
+            print ("----------------------------------")
     Vol_retained_aus_at_20=(N_total-N_product[-1])/4* Vgama_new(CTE_0_gama,C_in_aus[i],20)
     Total_vol=np.sum(Vol_dn_alpha_at_20) + np.sum(Vol_dn_cem_at_20) + Vol_retained_aus_at_20
-    for i in xrange(len(Vol_dn_alpha_at_20)):
+    for i in range(len(Vol_dn_alpha_at_20)):
         Vol_transformed[i]=np.sum(Vol_dn_alpha_at_20[0:i])+np.sum(Vol_dn_cem_at_20[0:i])
     Vol_f_transformed= Vol_transformed/Total_vol
-    print "volume fraction of retained austenite =", Vol_retained_aus_at_20/Total_vol
+    print ("volume fraction of retained austenite =", Vol_retained_aus_at_20/Total_vol)
     vol_f_retained_aus=Vol_retained_aus_at_20/Total_vol
     dataname=filename[:-4]
     f=np.zeros(len(time_fit))
@@ -1276,7 +1255,7 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
     fitted=np.polynomial.hermite.hermval(temp_analysis[10:-50],C)
     
     plt.plot(temp_analysis[10:-50],fitted,'-',label= 'Chebyshev Approximation '+ dataname)
-    print "end"
+    print ("end")
     
     result_master_time.append(time_fit)
     result_master_temp.append(temp_fit)
@@ -1296,12 +1275,12 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
 
 
 def master_fiter(x):
-    print '-'*49
+    print ('-'*49)
     i=0
     for val in x: # I am a genius! 
         globals()[x0_param_names[i]]=val
-        print x0_param_names[i]+'=' ,"%.30e" %val
-        print
+        print (x0_param_names[i]+'=' ,"%.30e" %val)
+        print()
         i=i+1
 
 
@@ -1320,7 +1299,7 @@ def master_fiter(x):
         Ms_master_dic.update(results[i][2])
         MF_dic.update(results[i][3])
         C_in_alpha_master_dic.update(results[i][4])
-    print 'err=         ' ,"%.30e" %err
+    print ('err=         ' ,"%.30e" %err)
     return err
 x0_param_names=[]
 x0_param_vals=[]
@@ -1346,13 +1325,13 @@ if __name__=='__main__':
 
     if optimize.lower()=='yes':
         if optimization_method==1:
-            print "Optimizing using the Nelder-Mead method"
+            print ("Optimizing using the Nelder-Mead method")
             res = scipy.optimize.minimize(master_fiter,x0_param_vals, method='Nelder-Mead',options={'ftol': 0.0001})
         elif optimization_method==2: 
-            print "Optimizing using the differential evolution method"
+            print ("Optimizing using the differential evolution method")
             res = scipy.optimize.differential_evolution(master_fiter,x0_param_bounds, strategy='best1exp')
         else: 
-            print "Error. Choose 1 or 2 as optimization method!"
+            print ("Error. Choose 1 or 2 as optimization method!")
     
     #    print '&&&&&&&&&&&&&&& End of round one &&&&&&&&&&&&&&&'
         x0_param_vals=res.x
@@ -1365,14 +1344,14 @@ if __name__=='__main__':
     
     for k in range(len(file_list)):
         Fitter_plot(file_list[k][0],output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,c_wf_for_cte,c_wf_for_a0)
-    print "*-"*25    
-    print 'a0_gama =    ' ,"%.30e" %a0_gama
-    print 'a0_alpha=    ' ,"%.30e" %a0_alpha
-    print 'CTE_alpha_a= ' ,"%.30e" %CTE_alpha_a
-    print 'CTE_alpha_b= ' ,"%.30e" %CTE_alpha_b
-    print 'CTE_alpha_c= ' ,"%.30e" %CTE_alpha_c
-    print 'c_wf_for_cte=' ,"%.30e" %c_wf_for_cte
-    print 'c_wf_for_a0= ' ,"%.30e" %c_wf_for_a0
+    print ("*-"*25)
+    print ('a0_gama =    ' ,"%.30e" %a0_gama)
+    print ('a0_alpha=    ' ,"%.30e" %a0_alpha)
+    print ('CTE_alpha_a= ' ,"%.30e" %CTE_alpha_a)
+    print ('CTE_alpha_b= ' ,"%.30e" %CTE_alpha_b)
+    print ('CTE_alpha_c= ' ,"%.30e" %CTE_alpha_c)
+    print ('c_wf_for_cte=' ,"%.30e" %c_wf_for_cte)
+    print ('c_wf_for_a0= ' ,"%.30e" %c_wf_for_a0)
     plt.figure(figsize=(8,6))
     for i in range(len(result_master_time)):
         plt.plot(result_master_temp[i][10:-10],1e9*result_master_lattice_param_gamma_during_trans[i][10:-10], '-',label=file_list[i][0])
@@ -1416,7 +1395,7 @@ if __name__=='__main__':
     end=time.time()
     if open_excel_result.lower()=='yes':
         call(['open', file_location])
-    print 'run time=',end-start
+    print ('run time=',end-start)
     if sys.platform[:3]==("lin" or "dar"):
         os.system("spd-say finished")
     #cProfile.run('main()')
@@ -1426,7 +1405,7 @@ if __name__=='__main__':
     #engine.runAndWait()
 
     if show_plots.lower()=='yes':
-        print "plots are chosen to be shown"
+        print ("plots are chosen to be shown")
         plt.show()
 
         

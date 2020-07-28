@@ -7,19 +7,21 @@ Created on Wed Dec 23 03:55:32 2015
 """
 
 # This program is called data_set_conditioner. It gets rid noise and excessive data point.
-
+# This version is base on ata_set_conditioner_V4 in the old version control system
 import csv
 import numpy as np
 import matplotlib.pyplot as plt
 from numpy.polynomial import polynomial as P
 import pickle
 import os
+from os.path import exists, join
 
 #Load setup file which contains information that master_fitter and fitter needs to work.
 #each line in the set file is like this:
 #filename,Aus_min_row,Aus_max_row,fer_min_row,fer_max_row,L0,cementite conditions,
 #values must be separated by comma "," and all lines must end with a comma.
 make_raw_data_plots = False
+raw_data_dir = 'raw_dil_data'
 file_list=[]
 d=open('master_setup.txt','r')
 for line in d:
@@ -31,9 +33,9 @@ for line in d:
         file_list.append(temp)
 
 current_dir=os.getcwd()
-A=os.listdir(current_dir)
-if 'working_directory' not in A:        
-    os.makedirs(current_dir+'/working_directory')
+#A=os.listdir(current_dir)
+if not exists('working_directory'):        
+    os.makedirs('working_directory')
 
 output = open(current_dir+'/working_directory/file_list_conditioned.pkl', 'wb')    
 pickle.dump(file_list, output)      
@@ -53,7 +55,7 @@ for var in file_list:
 #    else:
 #        Data =  open('G:\\Science_Backup\\Results\\Python_Dil_analysis\\Fitting_real_function\\'+var[0], 'rb')
     
-    Data=open(var[0],'r')
+    Data=open(join(raw_data_dir,var[0]),'r')
     D= csv.reader(Data)
     t = []
     temp = []
