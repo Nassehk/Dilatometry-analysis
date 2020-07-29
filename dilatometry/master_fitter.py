@@ -129,7 +129,7 @@ clear = lambda: os.system('clear'if sys.platform[:5]==('linux' or 'darwi') else 
 clear()
 
 
-# global variable are solver settings that are shared between V10 and V10_plot functions.
+#global variable are solver settings that are shared between V10 and V10_plot functions.
 global sr, reg_order, interval, Bs_model, end_fit_WF, overal_fit_WF, err_end_slop_WF
 global err_maximum_transformation_WF, Bs_master_dic, Ms_master_dic, MF_dic
 
@@ -137,7 +137,7 @@ global err_maximum_transformation_WF, Bs_master_dic, Ms_master_dic, MF_dic
 #solver settings
 
 optimize='no'# It tells the program to optimize or just plot usinong the parameters provided.yes / no
-show_plots='no'
+show_plots='yes'
 open_excel_result='no'
 interval=4
 
