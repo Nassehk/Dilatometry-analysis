@@ -101,7 +101,8 @@ __author__= "Nasseh Khodaie"
 __version__=3.00
 #import cProfile 
 #def main():
-import csv
+import pandas as pd
+import copy
 import numpy as np
 import matplotlib.pyplot as plt
 from numpy.polynomial import polynomial as P
@@ -123,23 +124,23 @@ from scipy.interpolate import interp1d
 import multiprocessing as mp
 from subprocess import call
 from master_fitter_utils import Valpha,Vbainite,VCement
-
+from functools import lru_cache
 start=time.time()
 clear = lambda: os.system('clear'if sys.platform[:5]==('linux' or 'darwi') else 'cls')
 clear()
 
 
-#global variable are solver settings that are shared between V10 and V10_plot functions.
+# global variable are solver settings that are shared between V10 and V10_plot functions.
 global sr, reg_order, interval, Bs_model, end_fit_WF, overal_fit_WF, err_end_slop_WF
 global err_maximum_transformation_WF, Bs_master_dic, Ms_master_dic, MF_dic
 
 ################################
 #solver settings
 
-optimize='no'# It tells the program to optimize or just plot usinong the parameters provided.yes / no
-show_plots='yes'
+optimize='yes'# It tells the program to optimize or just plot using the parameters provided.yes / no
+show_plots='no'
 open_excel_result='no'
-interval=4
+interval=8
 
 end_fit_WF=7
 overal_fit_WF=7
@@ -253,31 +254,23 @@ amount0_wp=[]
 
 if sr<interval: sr=interval
     
-c=open('chemistry.txt','r')
-for line in c:
-    temp=line.split(',')
-    elements.append(str(temp[0].lower()))
-    amount0_wp.append(float(temp[1]))
+with open('chemistry.csv','r') as c:
+    for line in c:
+        temp=line.split(',')
+        elements.append(str(temp[0].lower()))
+        amount0_wp.append(float(temp[1]))
 chemistry0=dict(zip(elements,amount0_wp))
 chemistry0_temp=dict(zip(elements,amount0_wp))# this is used in some calculation and altered during the process. Should not be used for anything. use chemistry0 instead.
 #def molar_fraction(elements,amounts_wp,req
 
 for elm in molar_weight.keys():
-    if elm in chemistry0.keys():
-        pass
-    else:
-        chemistry0.update(dict(zip([elm],[0])))
+    if elm not in chemistry0.keys():
+        chemistry0.update({elm:0})
 
-CSLA=lw('C_solubility_limit_austenite.xlsx')
-ws=CSLA.active
-T_CSLA=[]
-X_CSLA=[]
-for i in range(2,int(ws.max_row),1):
-    #print "Row # in carbon solubility =" , i
-    X_CSLA.append(float(ws.cell(row=i, column=1).value))
-    T_CSLA.append(float(ws.cell(row=i, column=2).value))
-T_CSLA=np.array(T_CSLA)
-X_CSLA=np.array(X_CSLA)
+
+CSLA = pd.read_excel('C_solubility_limit_austenite.xlsx')
+X_CSLA = CSLA.iloc[:,0].values
+T_CSLA = CSLA.iloc[:,1].values
 Solubility=interp1d(T_CSLA,X_CSLA,kind='linear')
 CSLA_der=scipy.misc.derivative(Solubility,T_CSLA[2:-2],dx=0.1,n=2)
 
@@ -297,7 +290,8 @@ def Solubility_aus_cement(T):#This function is not vectorizable because of the i
             CSLA=P.polyval(T,CSLA_low)
     else:
         CSLA=P.polyval(T,CSLA_high)
-    if CSLA<0: CSLA=0
+    if CSLA<0:
+        CSLA=0
     return CSLA
 #plt.figure(87)
 #plt.plot(T_CSLA,X_CSLA,'o')
@@ -336,7 +330,7 @@ def molar_fraction(elements,amounts_wp,required):
 #    required is the name of the element that its molar fraction is required.   
     fe_wp=100-sum(amounts_wp)
     elements.append('fe')
-    amounts_wp.extend([fe_wp])
+    amounts_wp.append(fe_wp)
     element_mol=np.zeros(len(elements))
     for i in range(len(elements)):
         element_mol[i]=amounts_wp[i]/molar_weight[elements[i]]
@@ -346,8 +340,8 @@ def molar_fraction(elements,amounts_wp,required):
     return matched[required]
 C0=molar_fraction(elements,amount0_wp,'c')
 
-def MF_to_WP_generator(local_chem):
-
+def MF_to_WP_generator(chem):
+    local_chem = copy.deepcopy(chem)
     C_wp=np.linspace(chemistry0['c'],6.0,200)
     C_MF=[]
     for i in range(len(C_wp)):
@@ -358,7 +352,7 @@ def MF_to_WP_generator(local_chem):
         C_MF.append(molar_fraction(elem,amo_wp,'c'))
     MF_to_WP=P.polyfit(C_MF,C_wp,4)
     return MF_to_WP
-MF_to_WP=MF_to_WP_generator(chemistry0_temp)
+MF_to_WP=MF_to_WP_generator(chemistry0)
             
 def mf_to_wp(MF):
     try:#This will allow handelling numpy arrays
@@ -393,7 +387,7 @@ aus_line_master=[]
 CTE_product_master=[]
 CTE_aus_master=[]
 
-#Let's calculate correction factors for L0s
+# This calculate correction factors for L0s
 for i in range(len(file_list)):
     delta_L_tot=delta_L_tot+np.amax(dil_master[i])/file_list[i][5]
     row_min_aus=int(file_list[i][1])
@@ -410,8 +404,7 @@ for i in range(len(file_list)):
 
 CTE_avr=CTE_tot/(i+1)
 delta_L_avr=delta_L_tot/(i+1)
-strain_at_normalizing_T_avr=np.sum(np.array(strain_at_normalizing_temp_master))/(i+1)
-Cooling_rate_master=[]
+strain_at_normalizing_T_avr=np.average(strain_at_normalizing_temp_master)
 
 CR_master=[]
 for row in file_list:
@@ -436,9 +429,6 @@ plt.title('CTE of austenite vs cooling rate')
 plt.xlabel('Cooling rate $(\degree C/s)$')
 plt.ylabel('CTE $(\\times 10^{-5})$')    
    
-
-#for i in the range(len(file_list)):
-#    cooling_rate_master.append(file_list[i][0])
 
 def corr_fact_l0(x):
     
@@ -572,20 +562,26 @@ def Bainite_ss_factor(T,C): #using relaxation observed in isothermal experiments
         print ("SSF_method must be either general or custom")
     return BSSF
 
-def C_in_alpha(T): #Mole fraction of C in alpha using thermocalc under para equilibrium
-    strT=str(T)[:(precision+1)]
-#    print C_in_alpha_master_dic
-    if strT in C_in_alpha_master_dic:
-        C=C_in_alpha_master_dic[strT]
-#        print "win"
-    else:
-        C= 1.4734491E-20*T**6 + 3.9638142E-17*T**5 - 1.1293268E-13*T**4 + 6.8406210E-11*T**3 - 9.3489472E-09*T**2 + 6.1810195E-07*T - 6.3920771E-06
-#        print "calculated oldfashion"        
-        if C<0:
-#            print "C in alpha negative"
-            C==0        
-        C_in_alpha_temp_dic[strT]=C
+@lru_cache
+def C_in_alpha(T):
+    C= 1.4734491E-20*T**6 + 3.9638142E-17*T**5 - 1.1293268E-13*T**4 + 6.8406210E-11*T**3 - 9.3489472E-09*T**2 + 6.1810195E-07*T - 6.3920771E-06
     return C
+
+
+#def C_in_alpha(T): #Mole fraction of C in alpha using thermocalc under paraequilibrium
+#    strT=str(T)[:(precision+1)]
+##    print C_in_alpha_master_dic
+#    if strT in C_in_alpha_master_dic:
+#        C=C_in_alpha_master_dic[strT]
+##        print "win"
+#    else:
+#        C= 1.4734491E-20*T**6 + 3.9638142E-17*T**5 - 1.1293268E-13*T**4 + 6.8406210E-11*T**3 - 9.3489472E-09*T**2 + 6.1810195E-07*T - 6.3920771E-06
+##        print "calculated oldfashion"        
+#        if C<0:
+##            print "C in alpha negative"
+#            C==0        
+#        C_in_alpha_temp_dic[strT]=C
+#    return C
 
 def L(C): # L is an operator that changes C=N_C/(N_C+N_Fe) to N_C/N_Fe. 0<C<1
     L=C/(1-C)
@@ -593,10 +589,7 @@ def L(C): # L is an operator that changes C=N_C/(N_C+N_Fe) to N_C/N_Fe. 0<C<1
 
 output = mp.Queue()
 
-def Fitter(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha, c_wf_for_cte,Bs_master_dic, MF_dic, Ms_master_dic, C_in_alpha_master_dic):
-#    print 'length of MF_dic= ',len (MF_dic)
-    global sr, reg_order, interval, Bs_model, end_fit_WF, overal_fit_WF, err_end_slop_WF,\
-    err_maximum_transformation_WF
+def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_alpha,  c_wf_for_cte, Bs_master_dic, MF_dic, Ms_master_dic, C_in_alpha_master_dic):
 
     N_total=0
     k=0
@@ -607,9 +600,13 @@ def Fitter(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,
             k+=1
 #    print "k=", k
     L0=file_list[k][5]+L0_correction[k]
-    time=np.array(time_master[k])
-    temperature=np.array(temp_master[k])
-    dilation=np.array(dil_master[k])
+#    time=np.array(time_master[k])
+#    temperature=np.array(temp_master[k])
+#    dilation=np.array(dil_master[k])
+
+    time=time_master[k]
+    temperature=temp_master[k]
+    dilation=dil_master[k]
 
     # determine pure austenite range
     row_min_aus=int(file_list[k][1])
@@ -633,17 +630,9 @@ def Fitter(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,
     row_min= row_min_aus
     row_max=row_max_fer
 
-    # create experimentally measured dv/dt for every data point in analysis range
-
     time_analysis=time[row_min:row_max+1]
     dil_analysis=dilation[row_min:row_max+1]
     temp_analysis=temperature[row_min:row_max+1]
-
-#    def C_in_alpha(T): #Mole fraction of C in alpha using thermocalc under para equilibrium
-#        C= 1.4734491E-20*T**6 + 3.9638142E-17*T**5 - 1.1293268E-13*T**4 + 6.8406210E-11*T**3 - 9.3489472E-09*T**2 + 6.1810195E-07*T - 6.3920771E-06
-#        return abs(C)
-
-      
 
     def Vgama_param(a0_gama,CTE_0_gama,T):
         Vgama=((a0_gama+6.5e-4*1e-9*C0*100)*(1+(CTE_0_gama-0.5E-6*C0*100)*(T-726.85)))**3
@@ -681,7 +670,7 @@ def Fitter(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,
         return err
 
     x0=[3e22]#initial estimate of x0 (here it represents N_t) is very important. Too big of number will give error.
-    for i in range(5):
+    for i in range(3):
         res = scipy.optimize.minimize(fundamental_parameters,x0, method='Nelder-Mead')
         x0= res.x
     N_total=x0[0]
@@ -1410,3 +1399,4 @@ if __name__=='__main__':
 
         
             
+
