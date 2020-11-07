@@ -139,9 +139,9 @@ for i in range(len(time_master)):
         time_cond.append(regressed[0])
         temp_cond.append(regressed[1])
         dil_cond.append(regressed[2])
-    time_cond_master.append(time_cond) 
-    temp_cond_master.append(temp_cond)
-    dil_cond_master.append(dil_cond)
+    time_cond_master.append(np.array(time_cond))
+    temp_cond_master.append(np.array(temp_cond))
+    dil_cond_master.append(np.array(dil_cond))
 
 
 output = open(current_dir+'/working_directory/time_conditioned.pkl', 'wb')    
@@ -194,4 +194,5 @@ if make_raw_data_plots:
         plt.plot(time_cond_master[i],temp_cond_master[i],"o", label=file_list[i][0])
     plt.legend()
     #plt.show()
+
 
