@@ -137,10 +137,10 @@ global err_maximum_transformation_WF, Bs_master_dic, Ms_master_dic, MF_dic
 ################################
 #solver settings
 
-optimize='yes'# It tells the program to optimize or just plot using the parameters provided.yes / no
+optimize='no'# It tells the program to optimize or just plot using the parameters provided.yes / no
 show_plots='no'
 open_excel_result='no'
-interval=8
+interval=2
 
 end_fit_WF=7
 overal_fit_WF=7
@@ -887,9 +887,6 @@ def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_
 def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,c_wf_for_cte, c_wf_for_a0):
     print ('----------V10_plot-------------')
 
-#    a0_alpha=0.28630e-9 # measured using from XRD at 20C. Should not be concidered in parameter finding.
-    global sr, reg_order, interval, Bs_model, end_fit_WF, overal_fit_WF
-#    print Ms_model
     N_total=0
     k=0
     for var in file_list:
@@ -955,7 +952,7 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
     
 
 #    
-    def C_in_gama(timestep,current_dn_alpha,dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn): #amount of C in gama on the timestep point in mole fraction
+    def C_in_gama(timestep, current_dn_alpha, dn_alpha, C_dn, N_total, N_product, temp_fit, ID_dn): #amount of C in gama on the timestep point in mole fraction
     #    print "From C_in _gama,current_dn_alpha is ", current_dn_alpha
         C_total_in_ferrite=sum(dn_alpha[:timestep-1]*L(C_dn[:timestep-1]))+current_dn_alpha*L(C_dn[timestep-1]) #this calculates total number of C atoms in ferrite phase
         if ID_dn[timestep-1][3:6]=="Cem":
@@ -1226,25 +1223,25 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
     plt.legend()
     plt.grid()
 
-    plt.figure(44,figsize=(8,7))
-    plt.plot(temp_analysis,dil_analysis+L0,'.',label= 'Experimental '+ dataname)
-    plt.xlabel('Temperature $(\\degree C)$')
-    plt.ylabel('Sample length $(m)$')
-    plt.grid()
-#    C=np.polynomial.chebyshev.chebfit(temp_analysis[50:-50],dil_analysis[50:-50]+L0,5)
-#    fitted=np.polynomial.chebyshev.chebval(temp_analysis[50:-50],C)
-    
-#    C=np.polynomial.legendre.legfit(temp_analysis[10:-50],dil_analysis[10:-50]+L0,50)
-#    fitted=np.polynomial.legendre.legval(temp_analysis[10:-50],C)
-    
-#    C=np.polynomial.laguerre.lagfit(temp_analysis[10:-50],dil_analysis[10:-50]+L0,30)
-#    fitted=np.polynomial.laguerre.lagval(temp_analysis[10:-50],C)
-    
-    C=np.polynomial.hermite.hermfit(temp_analysis[10:-50],dil_analysis[10:-50]+L0,30)
-    fitted=np.polynomial.hermite.hermval(temp_analysis[10:-50],C)
-    
-    plt.plot(temp_analysis[10:-50],fitted,'-',label= 'Chebyshev Approximation '+ dataname)
-    print ("end")
+#    plt.figure(44,figsize=(8,7))
+#    plt.plot(temp_analysis,dil_analysis+L0,'.',label= 'Experimental '+ dataname)
+#    plt.xlabel('Temperature $(\\degree C)$')
+#    plt.ylabel('Sample length $(m)$')
+#    plt.grid()
+##    C=np.polynomial.chebyshev.chebfit(temp_analysis[50:-50],dil_analysis[50:-50]+L0,5)
+##    fitted=np.polynomial.chebyshev.chebval(temp_analysis[50:-50],C)
+#    
+##    C=np.polynomial.legendre.legfit(temp_analysis[10:-50],dil_analysis[10:-50]+L0,50)
+##    fitted=np.polynomial.legendre.legval(temp_analysis[10:-50],C)
+#    
+##    C=np.polynomial.laguerre.lagfit(temp_analysis[10:-50],dil_analysis[10:-50]+L0,30)
+##    fitted=np.polynomial.laguerre.lagval(temp_analysis[10:-50],C)
+#    
+#    C=np.polynomial.hermite.hermfit(temp_analysis[10:-50],dil_analysis[10:-50]+L0,30)
+#    fitted=np.polynomial.hermite.hermval(temp_analysis[10:-50],C)
+#    
+#    plt.plot(temp_analysis[10:-50],fitted,'-',label= 'Chebyshev Approximation '+ dataname)
+#    print ("end")
     
     result_master_time.append(time_fit)
     result_master_temp.append(temp_fit)
