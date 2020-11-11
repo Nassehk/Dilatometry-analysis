@@ -568,24 +568,8 @@ def C_in_alpha(T):
     return C
 
 
-#def C_in_alpha(T): #Mole fraction of C in alpha using thermocalc under paraequilibrium
-#    strT=str(T)[:(precision+1)]
-##    print C_in_alpha_master_dic
-#    if strT in C_in_alpha_master_dic:
-#        C=C_in_alpha_master_dic[strT]
-##        print "win"
-#    else:
-#        C= 1.4734491E-20*T**6 + 3.9638142E-17*T**5 - 1.1293268E-13*T**4 + 6.8406210E-11*T**3 - 9.3489472E-09*T**2 + 6.1810195E-07*T - 6.3920771E-06
-##        print "calculated oldfashion"        
-#        if C<0:
-##            print "C in alpha negative"
-#            C==0        
-#        C_in_alpha_temp_dic[strT]=C
-#    return C
-
 def L(C): # L is an operator that changes C=N_C/(N_C+N_Fe) to N_C/N_Fe. 0<C<1
-    L=C/(1-C)
-    return L
+    return C/(1-C)
 
 output = mp.Queue()
 
@@ -633,19 +617,10 @@ def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_
     time_analysis=time[row_min:row_max+1]
     dil_analysis=dilation[row_min:row_max+1]
     temp_analysis=temperature[row_min:row_max+1]
+
     def Vgama (C,T):
         return ((a0_gama + 6.5e-4 * 1e-9 * C * 100) * (1 + (CTE_0_gama - 0.5E-6 * C * 100) * (T-726.85)))**3
         
-
-
-#    def Vgama_param(a0_gama,CTE_0_gama,T):
-##        Vgama=((a0_gama+6.5e-4*1e-9*C0*100)*(1+(CTE_0_gama-0.5E-6*C0*100)*(T-726.85)))**3
-#        return Vgama(C0, T)
-#
-#    def Vgama_new (CTE_0_gama,C,T): # check if C is mole fraction
-##        Vgama=((a0_gama+6.5e-4*1e-9*C*100)*(1+(CTE_0_gama-0.5E-6*C*100)*(T-726.85)))**3
-#        return Vgama(C, T)
-    
 #    def VCement(T): #T in centigrade. This function can be optimized for faster run
 #        y=(1+(5.311E-6-1.942E-9*T+9.655E-12*T*T)*(T-20))
 #        a=0.45234E-9*y
@@ -807,10 +782,7 @@ def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_
 
             res=scipy.optimize.minimize(expm_l_individual, dn_alpha[i-1], args = (i, 'error'), method='nelder-mead', options={})
             K=res.x
-            dn_alpha[i-1]=K[0]
-#            if "MS" in ID_dn:
-#                print "right after calcs: ",dn_alpha[i-1]            
-            
+            dn_alpha[i-1]=K[0]     
             
             #lets put a constraint on dn to control noise which result in incorrect negative dn            
             if ((dn_alpha[i-1])/N_total)<1e-3:
@@ -837,7 +809,7 @@ def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_
     # err_end_fit issues error when fit is not good at the ferrite end. sometimes ferrite end has fewer point that makes them less effective in overal error. 
     # separeting them allows for increasing there value in overal error 
     err_end_fit=(5+sum(abs((dil_fit[len(temp_fit)-no_end_points:]+L0)-simulated_l[len(temp_fit)-no_end_points:]))/L0)**end_fit_WF-5**end_fit_WF
-    err_end_fraction=float(0.0)# this issues error if end fraction goes above 1
+    err_end_fraction=0# this issues error if end fraction goes above 1
     Numer_of_high_point=int(0)
     for i in range(len(temp_fit)//3,len(temp_fit)): 
 #        print i
@@ -1264,12 +1236,12 @@ def master_fiter(x):
     results = [output.get() for p in processes]
 #    print results
     err=0
-    for i in range(len(results)):
-        err+=results[i][0]
-        Bs_master_dic.update(results[i][1])
-        Ms_master_dic.update(results[i][2])
-        MF_dic.update(results[i][3])
-        C_in_alpha_master_dic.update(results[i][4])
+    for result in results:
+        err+=result[0]
+        Bs_master_dic.update(result[1])
+        Ms_master_dic.update(result[2])
+        MF_dic.update(result[3])
+        C_in_alpha_master_dic.update(result[4])
     print ('err=         ' ,"%.30e" %err)
     return err
 x0_param_names=[]
