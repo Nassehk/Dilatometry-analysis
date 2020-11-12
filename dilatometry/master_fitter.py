@@ -571,53 +571,73 @@ def C_in_alpha(T):
 def L(C): # L is an operator that changes C=N_C/(N_C+N_Fe) to N_C/N_Fe. 0<C<1
     return C/(1-C)
 
+
+def dataset_preprocess(file_list):
+    final = {}
+    for k, info in enumerate (file_list):
+        file_name = info[0]
+        L0=file_list[k][5]+L0_correction[k]
+    
+    
+        time=time_master[k]
+        temperature=temp_master[k]
+        dilation=dil_master[k]
+    
+        # determine pure austenite range
+        row_min_aus=int(file_list[k][1])
+        row_max_aus=int(file_list[k][2])
+    #    time_analysis_aus=time[row_min_aus:row_max_aus+1]
+        dil_analysis_aus=dilation[row_min_aus:row_max_aus+1]
+        temp_analysis_aus=temperature[row_min_aus:row_max_aus+1]
+    
+    
+    #$$$$$$$$$$$$$$$$$$$$$$$$$    
+        #lets calculate the CTE_0_gama using raw data
+        CTE_actual_gama=P.polyfit(temp_analysis_aus,dil_analysis_aus,1)[1]/L0
+        #CTE_0_gama is the CTE of austenite at zero mole fraction carbon
+        CTE_0_gama=CTE_actual_gama+0.5E-6*C0*100  
+    #$$$$$$$$$$$$$$$$$$$$$$$$$ 
+         
+        row_min_fer=int(file_list[k][3])
+        row_max_fer=int(file_list[k][4])
+    
+        #determin the range of interest for fraction transformed calculation.
+        row_min= row_min_aus
+        row_max=row_max_fer
+    
+        time_analysis=time[row_min:row_max+1]
+        dil_analysis=dilation[row_min:row_max+1]
+        temp_analysis=temperature[row_min:row_max+1]
+    
+    
+        time_fit=np.zeros((row_max-row_min-2*sr)//interval)
+        temp_fit=np.zeros((row_max-row_min-2*sr)//interval)
+        dil_fit=np.zeros((row_max-row_min-2*sr)//interval)
+    #    dldt_fit=np.zeros((row_max-row_min-2*sr)//interval)
+        num_of_analized_points=len(time_fit)
+    
+        n=sr
+        
+        # TODO all this should be done once out of the fitter. reduces amount of calculations.
+        for i in range(num_of_analized_points):
+            #print'i= ',i
+            time_fit[i]=time_analysis[n]
+            coef1= P.polyfit(time_analysis[n-sr:n+sr],temp_analysis[n-sr:n+sr],reg_order)
+            temp_fit[i]=P.polyval(time_analysis[n],coef1)
+            coef1= P.polyfit(time_analysis[n-sr:n+sr],dil_analysis[n-sr:n+sr],reg_order)
+            dil_fit[i]=P.polyval(time_analysis[n],coef1)
+            n=n+interval
+        final[file_name] = [CTE_0_gama, num_of_analized_points,time_fit, temp_fit, dil_fit]
+    return final
+
+key_data = dataset_preprocess(file_list)       
 output = mp.Queue()
 
 def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_alpha,  c_wf_for_cte, Bs_master_dic, MF_dic, Ms_master_dic, C_in_alpha_master_dic):
 
     N_total=0
-    k=0
-    for var in file_list:
-        if var[0]==filename:
-            break
-        else:
-            k+=1
-#    print "k=", k
-    L0=file_list[k][5]+L0_correction[k]
-#    time=np.array(time_master[k])
-#    temperature=np.array(temp_master[k])
-#    dilation=np.array(dil_master[k])
-
-    time=time_master[k]
-    temperature=temp_master[k]
-    dilation=dil_master[k]
-
-    # determine pure austenite range
-    row_min_aus=int(file_list[k][1])
-    row_max_aus=int(file_list[k][2])
-#    time_analysis_aus=time[row_min_aus:row_max_aus+1]
-    dil_analysis_aus=dilation[row_min_aus:row_max_aus+1]
-    temp_analysis_aus=temperature[row_min_aus:row_max_aus+1]
-
-
-#$$$$$$$$$$$$$$$$$$$$$$$$$    
-    #lets calculate the CTE_0_gama using raw data
-    CTE_actual_gama=P.polyfit(temp_analysis_aus,dil_analysis_aus,1)[1]/L0
-    #CTE_0_gama is the CTE of austenite at zero mole fraction carbon
-    CTE_0_gama=CTE_actual_gama+0.5E-6*C0*100  
-#$$$$$$$$$$$$$$$$$$$$$$$$$ 
-     
-    row_min_fer=int(file_list[k][3])
-    row_max_fer=int(file_list[k][4])
-
-    #determin the range of interest for fraction transformed calculation.
-    row_min= row_min_aus
-    row_max=row_max_fer
-
-    time_analysis=time[row_min:row_max+1]
-    dil_analysis=dilation[row_min:row_max+1]
-    temp_analysis=temperature[row_min:row_max+1]
-
+    CTE_0_gama, num_of_analized_points, time_fit, temp_fit, dil_fit = key_data[filename]
+    
     def Vgama (C,T):
         return ((a0_gama + 6.5e-4 * 1e-9 * C * 100) * (1 + (CTE_0_gama - 0.5E-6 * C * 100) * (T-726.85)))**3
         
@@ -654,33 +674,9 @@ def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_
         x0= res.x
     N_total=x0[0]
     
-    
-    
     print ('N_total of %s=%s'%(filename,N_total))
 #    print 'CTE_0_gama of %s=%s'%(filename,CTE_0_gama)
-#    print
- 
-#    raw_input('Hit enter to begin fitting points')
-
-    time_fit=np.zeros((row_max-row_min-2*sr)//interval)
-    temp_fit=np.zeros((row_max-row_min-2*sr)//interval)
-    dil_fit=np.zeros((row_max-row_min-2*sr)//interval)
-#    dldt_fit=np.zeros((row_max-row_min-2*sr)//interval)
-    num_of_analized_points=len(time_fit)
-
-    n=sr
-    
-    # TODO all this should be done once out of the fitter. reduces amount of calculations.
-    for i in range(num_of_analized_points):
-        #print'i= ',i
-        time_fit[i]=time_analysis[n]
-        coef1= P.polyfit(time_analysis[n-sr:n+sr],temp_analysis[n-sr:n+sr],reg_order)
-        temp_fit[i]=P.polyval(time_analysis[n],coef1)
-        coef1= P.polyfit(time_analysis[n-sr:n+sr],dil_analysis[n-sr:n+sr],reg_order)
-        dil_fit[i]=P.polyval(time_analysis[n],coef1)
-        n=n+interval
-
-        
+       
     def expm_l_individual(x,i, return_type = 'modeled_L'):
         previ_alpha_v=0.0
         current_step_alpha=0.0
@@ -831,6 +827,7 @@ def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_
 
     output.put([total_cost,Bs_temp_dic,Ms_temp_dic,MF_temp_dic,C_in_alpha_temp_dic])#+err_pure_phase)#+err_gama_fit+err_alpha_fit)
 
+
 def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,c_wf_for_cte, c_wf_for_a0):
     print ('----------V10_plot-------------')
 
@@ -890,20 +887,26 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
 #        C= 1.4734491E-20*T**6 + 3.9638142E-17*T**5 - 1.1293268E-13*T**4 + 6.8406210E-11*T**3 - 9.3489472E-09*T**2 + 6.1810195E-07*T - 6.3920771E-06
 #        return abs(C)
 
+    time_fit=np.zeros((row_max-row_min-2*sr)//interval)
+    temp_fit=np.zeros((row_max-row_min-2*sr)//interval)
+    dil_fit=np.zeros((row_max-row_min-2*sr)//interval)
+#    dldt_fit=np.zeros((row_max-row_min-2*sr)//interval)
+    num_of_analized_points=len(time_fit)
+
+    n=sr
+    for i in range(num_of_analized_points):
+        #print'i= ',i
+        time_fit[i]=time_analysis[n]
+        coef1= P.polyfit(time_analysis[n-sr:n+sr],temp_analysis[n-sr:n+sr],reg_order)
+        temp_fit[i]=P.polyval(time_analysis[n],coef1)
+        coef1= P.polyfit(time_analysis[n-sr:n+sr],dil_analysis[n-sr:n+sr],reg_order)
+        dil_fit[i]=P.polyval(time_analysis[n],coef1)
+        n=n+interval
+        
     def Vgama (C,T):
         return ((a0_gama + 6.5e-4 * 1e-9 * C * 100) * (1 + (CTE_0_gama - 0.5E-6 * C * 100) * (T-726.85)))**3
         
-#    def Vgama_param(a0_gama,CTE_0_gama,T):
-#        Vgama=((a0_gama+6.5e-4*1e-9*C0*100)*(1+(CTE_0_gama-0.5E-6*C0*100)*(T-726.85)))**3
-#        return Vgama
-#    
-#    def Vgama_new (CTE_0_gama,C,T): # check if C is mole fraction
-#        Vgama=((a0_gama+6.5e-4*1e-9*C*100)*(1+(CTE_0_gama-0.5E-6*C*100)*(T-726.85)))**3
-#        return Vgama
-
-    
-
-#    
+  
     def C_in_gama(timestep,current_dn_alpha,dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn): #amount of C in gama on the timestep point
         C_total_in_ferrite=sum(dn_alpha[:timestep-1]*L(C_dn[:timestep-1]))+current_dn_alpha*L(C_dn[timestep-1]) #this calculates total number of C atoms in ferrite phase
         if ID_dn[timestep-1][3:6]=="Cem":
@@ -952,21 +955,7 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
 ############################################
     
     
-    time_fit=np.zeros((row_max-row_min-2*sr)//interval)
-    temp_fit=np.zeros((row_max-row_min-2*sr)//interval)
-    dil_fit=np.zeros((row_max-row_min-2*sr)//interval)
-#    dldt_fit=np.zeros((row_max-row_min-2*sr)//interval)
-    num_of_analized_points=len(time_fit)
 
-    n=sr
-    for i in range(num_of_analized_points):
-        #print'i= ',i
-        time_fit[i]=time_analysis[n]
-        coef1= P.polyfit(time_analysis[n-sr:n+sr],temp_analysis[n-sr:n+sr],reg_order)
-        temp_fit[i]=P.polyval(time_analysis[n],coef1)
-        coef1= P.polyfit(time_analysis[n-sr:n+sr],dil_analysis[n-sr:n+sr],reg_order)
-        dil_fit[i]=P.polyval(time_analysis[n],coef1)
-        n=n+interval
 
 
     def expm_l_individual_err(x):
