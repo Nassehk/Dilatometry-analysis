@@ -137,7 +137,7 @@ global err_maximum_transformation_WF, Bs_master_dic, Ms_master_dic, MF_dic
 ################################
 #solver settings
 
-optimize='no'# It tells the program to optimize or just plot using the parameters provided.yes / no
+optimize='yes'# It tells the program to optimize or just plot using the parameters provided.yes / no
 show_plots='no'
 open_excel_result='no'
 interval=8
@@ -218,13 +218,7 @@ CTE_alpha_c=  1.303580639054562249575831833770e-05
 c_wf_for_cte= 2.591159702736662369566833508117e-04
 c_wf_for_a0=  2.996310242996993135602471934982e-12
 
-#a0_gama =     3.630354505175200875243544068702e-10
-#a0_alpha=     2.888566220514916827829597935069e-10
-#CTE_alpha_a=  0.000000000000000000000000000000e+00
-#CTE_alpha_b=  5.100515466196044894327662957024e-09
-#CTE_alpha_c=  1.377862867835536562631688906055e-05
-#c_wf_for_cte= 2.467360515210994566237534542097e-04
-#c_wf_for_a0=  3.047579958701796859491204777569e-12
+
 #################################
 result_master_time=[]
 result_master_temp=[]
@@ -574,28 +568,356 @@ def C_in_alpha(T):
     return C
 
 
-#def C_in_alpha(T): #Mole fraction of C in alpha using thermocalc under paraequilibrium
-#    strT=str(T)[:(precision+1)]
-##    print C_in_alpha_master_dic
-#    if strT in C_in_alpha_master_dic:
-#        C=C_in_alpha_master_dic[strT]
-##        print "win"
-#    else:
-#        C= 1.4734491E-20*T**6 + 3.9638142E-17*T**5 - 1.1293268E-13*T**4 + 6.8406210E-11*T**3 - 9.3489472E-09*T**2 + 6.1810195E-07*T - 6.3920771E-06
-##        print "calculated oldfashion"        
-#        if C<0:
-##            print "C in alpha negative"
-#            C==0        
-#        C_in_alpha_temp_dic[strT]=C
-#    return C
-
 def L(C): # L is an operator that changes C=N_C/(N_C+N_Fe) to N_C/N_Fe. 0<C<1
-    L=C/(1-C)
-    return L
+    return C/(1-C)
 
+
+def dataset_preprocess(file_list):
+    final = {}
+    for k, info in enumerate (file_list):
+        file_name = info[0]
+        L0=file_list[k][5]+L0_correction[k]
+    
+    
+        time=time_master[k]
+        temperature=temp_master[k]
+        dilation=dil_master[k]
+    
+        # determine pure austenite range
+        row_min_aus=int(file_list[k][1])
+        row_max_aus=int(file_list[k][2])
+    #    time_analysis_aus=time[row_min_aus:row_max_aus+1]
+        dil_analysis_aus=dilation[row_min_aus:row_max_aus+1]
+        temp_analysis_aus=temperature[row_min_aus:row_max_aus+1]
+    
+    
+    #$$$$$$$$$$$$$$$$$$$$$$$$$    
+        #lets calculate the CTE_0_gama using raw data
+        CTE_actual_gama=P.polyfit(temp_analysis_aus,dil_analysis_aus,1)[1]/L0
+        #CTE_0_gama is the CTE of austenite at zero mole fraction carbon
+        CTE_0_gama=CTE_actual_gama+0.5E-6*C0*100  
+    #$$$$$$$$$$$$$$$$$$$$$$$$$ 
+         
+        row_min_fer=int(file_list[k][3])
+        row_max_fer=int(file_list[k][4])
+    
+        #determin the range of interest for fraction transformed calculation.
+        row_min= row_min_aus
+        row_max=row_max_fer
+    
+        time_analysis=time[row_min:row_max+1]
+        dil_analysis=dilation[row_min:row_max+1]
+        temp_analysis=temperature[row_min:row_max+1]
+    
+    
+        time_fit=np.zeros((row_max-row_min-2*sr)//interval)
+        temp_fit=np.zeros((row_max-row_min-2*sr)//interval)
+        dil_fit=np.zeros((row_max-row_min-2*sr)//interval)
+    #    dldt_fit=np.zeros((row_max-row_min-2*sr)//interval)
+        num_of_analized_points=len(time_fit)
+    
+        n=sr
+        
+        # TODO all this should be done once out of the fitter. reduces amount of calculations.
+        for i in range(num_of_analized_points):
+            #print'i= ',i
+            time_fit[i]=time_analysis[n]
+            coef1= P.polyfit(time_analysis[n-sr:n+sr],temp_analysis[n-sr:n+sr],reg_order)
+            temp_fit[i]=P.polyval(time_analysis[n],coef1)
+            coef1= P.polyfit(time_analysis[n-sr:n+sr],dil_analysis[n-sr:n+sr],reg_order)
+            dil_fit[i]=P.polyval(time_analysis[n],coef1)
+            n=n+interval
+        final[file_name] = [CTE_0_gama, num_of_analized_points,time_fit, temp_fit, dil_fit, time_analysis, temp_analysis, dil_analysis]
+    return final
+
+key_data = dataset_preprocess(file_list)       
 output = mp.Queue()
 
-def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_alpha,  c_wf_for_cte, Bs_master_dic, MF_dic, Ms_master_dic, C_in_alpha_master_dic):
+def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_alpha,  c_wf_for_cte, Bs_master_dic, MF_dic, Ms_master_dic, C_in_alpha_master_dic, run_mode = "fit"):
+
+    N_total=0
+    
+    CTE_0_gama, num_of_analized_points, time_fit, temp_fit, dil_fit, *_ = key_data[filename]
+    if run_mode == 'plot':
+        *_, time_analysis, temp_analysis, dil_analysis = key_data[filename]
+    
+    def Vgama (C,T):
+        return ((a0_gama + 6.5e-4 * 1e-9 * C * 100) * (1 + (CTE_0_gama - 0.5E-6 * C * 100) * (T-726.85)))**3
+        
+#    def VCement(T): #T in centigrade. This function can be optimized for faster run
+#        y=(1+(5.311E-6-1.942E-9*T+9.655E-12*T*T)*(T-20))
+#        a=0.45234E-9*y
+#        b=0.50883E-9*y
+#        c=0.67426E-9*y
+#        VCementite=a*b*c
+#        return VCementite
+        
+#    @jit(nopython=True)   
+    def C_in_gama(timestep,current_dn_alpha,dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn): #amount of C in gama on the timestep point
+        C_total_in_ferrite=sum(dn_alpha[:timestep-1]*L(C_dn[:timestep-1]))+current_dn_alpha*L(C_dn[timestep-1]) #this calculates total number of C atoms in ferrite phase
+        if ID_dn[timestep-1][3:6]=="Cem":
+            current_dn_cem=((N_total-N_product[timestep-1])*(L(C_in_aus_molefraction[timestep-1])-L(Solubility_aus_cement(temp_fit[timestep])))-current_dn_alpha*(L(C_dn[timestep-1])-L(Solubility_aus_cement(temp_fit[timestep]))))/(L(0.25)-L(Solubility_aus_cement(temp_fit[timestep])))
+        else:
+            current_dn_cem=0
+        C_total_in_cement=sum(dn_cement[:timestep-1]/3.0)+current_dn_cem/3.0
+        N_gama=N_total-(N_product[timestep-1]+current_dn_alpha+current_dn_cem)
+        C_in_gama_local=L(C0)*N_total-C_total_in_ferrite-C_total_in_cement #No. of C atoms in aus.
+        return C_in_gama_local/(N_gama+C_in_gama_local)
+    
+    def fundamental_parameters(x):
+        N_t=x
+        modeled_l_gama=((N_t/4)*Vgama(C0,temp_analysis_aus))**(1/3.0)
+        residual_gama=np.sum(np.abs(modeled_l_gama-(dil_analysis_aus+L0)))
+        err=residual_gama
+        return err
+
+    x0=[3e22]#initial estimate of x0 (here it represents N_t) is very important. Too big numbers will give error.
+    for i in range(3):
+        res = scipy.optimize.minimize(fundamental_parameters,x0, method='Nelder-Mead')
+        x0= res.x
+    N_total=x0[0]
+    
+    print ('N_total of %s=%s'%(filename,N_total))
+#    print 'CTE_0_gama of %s=%s'%(filename,CTE_0_gama)
+       
+    def expm_l_individual(x,i, return_type = 'modeled_L'):
+        previ_alpha_v=0.0
+        current_step_alpha=0.0
+        previ_cem_v=0.0
+        current_step_cem=0.0
+        dn_cem=0.0
+        for j in range(i-1): #This for loop calculates volume of all the previous steps. i-1 is correct
+            if ID_dn[j][0:2]=="PF":
+                previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Valpha(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
+            elif ID_dn[j][0:2]==("BF"):
+                previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Vbainite(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
+            
+            elif ID_dn[j][0:2]==("MS"):
+                previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Vbainite(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
+      
+            
+            if ID_dn[j][3:6]=="Cem":
+                previ_cem_v=previ_cem_v+dn_cement[j]/12*VCement(temp_fit[j])
+        
+        #let's calculate the volume in the current step
+        if ID_dn[i-1][0:2]=="PF":
+            current_step_alpha=x/2*Valpha(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
+        elif ID_dn[i-1][0:2]==("BF"):
+            current_step_alpha=x/2*Vbainite(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
+        
+        elif ID_dn[i-1][0:2]==("MS"):
+            current_step_alpha=x/2*Vbainite(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
+   
+        
+        if ID_dn[i-1][3:6]=="Cem":
+            AA=L(Solubility_aus_cement(temp_fit[i]))
+            dn_cem=((N_total-N_product[i-1])*(AA-L(C_in_aus_molefraction[i-1]))+x*(L(C_dn[i-1])-AA))/(-1/3.0+AA)            
+            current_step_cem=dn_cem/12*VCement(temp_fit[i]) #12 iron atoms in one unit cell of cementite.
+        current_gama_v=(N_total-sum(dn_alpha[:i-1])-x-sum(dn_cement[:i-1])-dn_cem)/4*Vgama(C_in_gama(i,x,dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn),temp_fit[i]) #Vgama should be fixed to get rid of x/N_total
+        modeled_V=previ_alpha_v+previ_cem_v+current_step_alpha+current_step_cem+current_gama_v
+        #print (raw_input('press any key to continue in individual loop'))
+        if return_type == 'modeled_L':
+            return (modeled_V)**(1/3.0)
+        elif return_type == 'error':
+            err=abs((dil_fit[i]+L0)**3-modeled_V)*10e19
+            return err
+
+    dn_alpha=np.ones(num_of_analized_points)*10**(np.log10(N_total)-4) #this is the starting point of calculation which is close enough to zero to be considered zero fraction transformed, yet large enough to allow for optimization.
+    dn_cement=np.zeros(num_of_analized_points)
+    C_dn=np.zeros(num_of_analized_points) # amount of C in the Ferrite derivetive phase.
+    ID_dn=[]
+    simulated_l=np.zeros(num_of_analized_points)
+    C_in_aus=np.ones(num_of_analized_points)*C0
+    C_in_aus_molefraction=np.ones(num_of_analized_points)*C0
+#    CTE_aus_current=np.zeros(len(dn_alpha))
+    N_product=np.zeros(num_of_analized_points)
+#    N_prod=np.zeros(len(temp_fit))
+    
+    if run_mode == 'plot':
+        lattice_param_gamma_during_trans=np.zeros(num_of_analized_points)
+        Vol_dn_alpha_at_20=np.zeros(num_of_analized_points-1)
+        Vol_dn_cem_at_20=np.zeros(num_of_analized_points-1)
+        Vol_transformed=np.zeros(num_of_analized_points-1)
+
+    for i in range(1,num_of_analized_points):
+        ii=i-1
+        T=(temp_fit[ii]+temp_fit[i])/2
+
+        # First we should determine what is the type of the product forming between i-1 and i. 
+        # We do that by assuming C_in_austenite during current step is equal to that of the last step.
+        if i>1:
+            if temp_fit[ii]<Ms(C_in_aus[ii]):
+                ID_dn.append("MS")                    
+            elif temp_fit[ii]<Bs(C_in_aus[ii]):
+#                    print "   Bainite forming according to empirical formula"
+                ID_dn.append("BF")
+            else:
+                ID_dn.append("PF")
+
+            if ID_dn[ii][0:2]=="PF":
+                C_dn[ii]=C_in_alpha(T)
+                if C_dn[ii] > C_in_gama (ii, dn_alpha[ii], dn_alpha, C_dn, N_total, N_product, temp_fit, ID_dn):
+                    C_dn[ii]=C_in_gama(ii,dn_alpha[ii],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
+            elif ID_dn[ii][0:2]=="BF":
+                C_eq=C_in_alpha(T)
+                C_dn[ii]=Bainite_ss_factor(T,C_in_gama(ii,dn_alpha[ii],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn))*(C_in_gama(ii,dn_alpha[ii],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)-C_eq)+C_eq
+                if C_dn[ii] > C_in_gama(ii, dn_alpha[ii], dn_alpha, C_dn, N_total, N_product, temp_fit, ID_dn):
+                    C_dn[ii]=C_in_gama(ii,dn_alpha[ii],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
+            elif ID_dn[ii][0:2]=="MS":
+                C_dn[ii]=C_in_gama(ii,dn_alpha[ii],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
+                
+            if ('yes' or 'y') in file_list[k][6].lower() and ID_dn[ii]!="MS" and C_in_gama(ii,dn_alpha[ii],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)>Solubility_aus_cement(temp_fit[ii]):
+                ID_dn[ii]=ID_dn[ii]+"+"+"Cem"
+            elif (("user" in file_list[k][6].lower()) and ID_dn[ii]!="MS" and (C_in_gama(ii,dn_alpha[ii],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)>Solubility_aus_cement(temp_fit[ii]))):
+                LCT=[float(s) for s in file_list[k][7].split() if s.isdigit()][0]#LCT stands for Lowest cementite tempereature
+                if T>LCT:
+                    ID_dn[ii]=ID_dn[ii]+"+"+"Cem"
+
+        elif i==1:
+            ID_dn.append("PF")
+            C_dn[ii]=C_in_alpha((temp_fit[ii]+temp_fit[i])/2)
+        else:
+            print ("There is a problem with ID_dn")
+            quit()
+
+        res=scipy.optimize.minimize(expm_l_individual, dn_alpha[ii], args = (i, 'error'), method='nelder-mead', options={})
+        K=res.x
+        dn_alpha[ii]=K[0]     
+        
+        #lets put a constraint on dn to control noise which result in incorrect negative dn            
+        if ((dn_alpha[ii])/N_total)<1e-3:
+            dn_alpha[ii]=0
+            
+        if ID_dn[ii][3:6]=="Cem":
+            AA=L(Solubility_aus_cement(temp_fit[i]))
+            dn_cement[ii]=((N_total-N_product[ii])*(-L(C_in_aus_molefraction[ii])+AA)+dn_alpha[ii]*(L(C_dn[ii])-AA))/(-1/3.0+AA)
+            
+#            if "MS" in ID_dn:
+#                print dn_alpha[ii]
+#        
+        N_product[i]=N_product[ii]+dn_alpha[ii]+dn_cement[ii]
+        #print (raw_input('press any key to go to next point in main loop'))
+        simulated_l[i]= expm_l_individual(dn_alpha[ii],i)
+
+        C_in_aus[i]=C_in_gama(i,dn_alpha[ii],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
+        C_in_aus_molefraction[i]=C_in_gama(i,dn_alpha[ii],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
+        if run_mode == 'plot':
+            lattice_param_gamma_during_trans[i]=(Vgama(C_in_aus[i],temp_fit[i]))**(1/3.0)
+            C_in_aus_molefraction[i]=C_in_gama(i,dn_alpha[ii],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
+    #            C_in_aus[i]= mf_to_wp(C)
+            C_total_in_ferrite=sum(dn_alpha[:i]*L(C_dn[:i]))
+            C_total_in_cementite=sum(dn_cement[:i]*(1/3.0))
+            C_total_in_gama=(N_total-N_product[i])*L(C_in_aus_molefraction[i])
+            Initial_C=N_total*L(C0)
+            C_balance=(C_total_in_ferrite+C_total_in_cementite+C_total_in_gama)/Initial_C            
+            print ("    T is" , temp_fit[i])
+            print ("    Current product is ", ID_dn[ii])
+            print ("    Fraction transformed is ", "%.3f" %(N_product[i]/N_total))
+            print ("    C balance (should be 1)= ", C_balance)
+    #            print "    dil_fit = ", dil_fit[i]
+            print ("----------------------------------")
+
+    if run_mode == 'fit':
+        no_end_points=int((row_max_fer-row_min_fer)//interval)
+        coef= P.polyfit(temp_fit[len(temp_fit)-no_end_points:],N_product[len(temp_fit)-no_end_points:],1)
+        err_end_slope=(5+abs(coef[1]/N_total))**err_end_slop_WF-5**err_end_slop_WF
+        # err_end_fit issues error when fit is not good at the ferrite end. sometimes ferrite end has fewer point that makes them less effective in overal error. 
+        # separeting them allows for increasing there value in overal error 
+        err_end_fit=(5+sum(abs((dil_fit[len(temp_fit)-no_end_points:]+L0)-simulated_l[len(temp_fit)-no_end_points:]))/L0)**end_fit_WF-5**end_fit_WF
+        err_end_fraction=0# this issues error if end fraction goes above 1
+        Numer_of_high_point=int(0)
+        for i in range(len(temp_fit)//3,len(temp_fit)): 
+    #        print i
+    #        print "len(temp_fit)",len(temp_fit)
+            if N_product[i]>N_total:
+                Numer_of_high_point+=1
+                err_end_fraction+=(5+((N_product[i]-N_total)/N_total))**20-5**20
+        
+        if (maximize_fraction_transformed.lower()==('yes'or 'y')):
+            err_maximum_transformation=(5+sum(abs(N_product[:-3]/N_total-1)))**err_maximum_transformation_WF-5**err_maximum_transformation_WF
+        else: err_maximum_transformation=0
+    
+        err_overal_fit=(5+sum(abs((dil_fit[1:-1]+L0)-simulated_l[1:-1]))/L0)**overal_fit_WF-5**overal_fit_WF
+    #    print 'err_pure_phase=' ,err_pure_phase
+    #    print "err_alpha_fit",err_alpha_fit
+        total_cost= err_overal_fit+ err_end_slope + err_end_fraction + err_end_fit + err_maximum_transformation
+    #    err_overal_fit=err_alpha_fit
+    
+    
+        output.put([total_cost,Bs_temp_dic,Ms_temp_dic,MF_temp_dic,C_in_alpha_temp_dic])#+err_pure_phase)#+err_gama_fit+err_alpha_fit)
+
+    
+    if run_mode == 'plot':
+        
+        Vol_retained_aus_at_20=(N_total-N_product[-1])/4* Vgama(C_in_aus[i],20)
+        Total_vol=np.sum(Vol_dn_alpha_at_20) + np.sum(Vol_dn_cem_at_20) + Vol_retained_aus_at_20
+        for i in range(len(Vol_dn_alpha_at_20)):
+            Vol_transformed[i]=np.sum(Vol_dn_alpha_at_20[0:i])+np.sum(Vol_dn_cem_at_20[0:i])
+        Vol_f_transformed= Vol_transformed/Total_vol
+        print ("volume fraction of retained austenite =", Vol_retained_aus_at_20/Total_vol)
+        vol_f_retained_aus=Vol_retained_aus_at_20/Total_vol
+        dataname=filename[:-4]
+        f=np.zeros(len(time_fit))
+        f=N_product/N_total
+        
+        
+    ############################################
+    # different from fitter
+    
+    
+        simulated_aus=np.zeros(len(temp_analysis))
+        for i in range (0, len(temp_analysis)):
+            simulated_aus[i]= (N_total/4*Vgama(C0,temp_analysis[i]))**(1/3.0)
+    
+        plt.figure(7,figsize=(8,6))
+        plt.plot(temp_analysis,1e3*(dil_analysis+L0),'.', label="experimental data -" + filename)
+        plt.legend(loc=2)
+        plt.title('Fit of austenite')
+        plt.plot(temp_analysis,1e3*simulated_aus, '-',label="Fitted austenite - " + filename)
+        plt.xlabel('Temperature$(\\degree C)$')
+        plt.ylabel('Specimen length $(mm)$')
+        plt.legend(loc=2)
+        plt.grid()    
+    
+        
+        plt.figure(8,figsize=(8,7))
+        plt.subplot(211)
+        plt.plot(temp_analysis,dil_analysis+L0,'.',label= 'Experimental '+ dataname)
+        plt.xlabel('Temperature $(\\degree C)$')
+        plt.ylabel('Sample length $(m)$')
+        plt.grid()
+    
+    
+        plt.subplot(211)
+        plt.plot(temp_fit[1:-1],simulated_l[1:-1], 'o',label= 'Calculated ' + dataname)
+        plt.legend(loc=2)
+        plt.subplot(212)
+        plt.plot(temp_fit,f,'o-', label= dataname)
+        plt.xlabel('Temperature $(\\degree C)$')
+        plt.ylabel('Ferrite mole fraction')
+        plt.legend()
+        plt.grid()
+    
+    
+        
+        result_master_time.append(time_fit)
+        result_master_temp.append(temp_fit)
+        result_master_dil.append(simulated_l)
+        result_master_fraction.append(f)
+        result_master_FD_fraction.append(dn_alpha/N_total)
+        result_master_C_in_FD_fraction.append(C_dn)
+        result_master_C_in_FD_WP.append(mf_to_wp(C_dn))
+        result_master_C_in_gama.append(C_in_aus)
+        result_master_cem_fraction.append(dn_cement/N_total)
+        result_master_lattice_param_gamma_during_trans.append(lattice_param_gamma_during_trans)
+        result_master_ID.append(ID_dn)
+        result_master_Vol_f_transformed.append(Vol_f_transformed)
+        result_master_FD_vol.append(Vol_dn_alpha_at_20/Total_vol)#calculates volume fraction of FD at 20C
+        result_master_cem_vol.append(Vol_dn_cem_at_20/Total_vol)#calculates volume of the phase at 20C
+        result_master_aus_vol.append(vol_f_retained_aus)#calculates volume of the phase at 20C    
+
+def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,c_wf_for_cte, c_wf_for_a0):
+    print ('----------V10_plot-------------')
 
     N_total=0
     k=0
@@ -613,305 +935,6 @@ def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_
     time=time_master[k]
     temperature=temp_master[k]
     dilation=dil_master[k]
-
-    # determine pure austenite range
-    row_min_aus=int(file_list[k][1])
-    row_max_aus=int(file_list[k][2])     
-    row_min_fer=int(file_list[k][3])
-    row_max_fer=int(file_list[k][4])
-#    time_analysis_aus=time[row_min_aus:row_max_aus+1]
-    dil_analysis_aus=dilation[row_min_aus:row_max_aus+1]
-    temp_analysis_aus=temperature[row_min_aus:row_max_aus+1]
-
-
-#$$$$$$$$$$$$$$$$$$$$$$$$$    
-    #lets calculate the CTE_0_gama using raw data
-    CTE_actual_gama=P.polyfit(temp_analysis_aus,dil_analysis_aus,1)[1]/L0
-    #CTE_0_gama is the CTE of austenite at zero mole fraction carbon
-    CTE_0_gama=CTE_actual_gama+0.5E-6*C0*100  
-#$$$$$$$$$$$$$$$$$$$$$$$$$ 
-
-
-    #determin the range of interest for fraction transformed calculation.
-    row_min= row_min_aus
-    row_max=row_max_fer
-
-    time_analysis=time[row_min:row_max+1]
-    dil_analysis=dilation[row_min:row_max+1]
-    temp_analysis=temperature[row_min:row_max+1]
-
-    def Vgama(C, T):
-        Vgama=((a0_gama+6.5e-4*1e-9*C*100)*(1+(CTE_0_gama-0.5E-6*C*100)*(T-726.85)))**3
-        return Vgama
-
-#    def Vgama_param(a0_gama,CTE_0_gama,T):
-#        return Vgama(C0, T)
-
-#    def Vgama_new (CTE_0_gama,C,T): # check if C is mole fraction
-#        Vgama=((a0_gama+6.5e-4*1e-9*C*100)*(1+(CTE_0_gama-0.5E-6*C*100)*(T-726.85)))**3
-#        return Vgama
-
-
-        
-#    def VCement(T): #T in centigrade. This function can be optimized for faster run
-#        y=(1+(5.311E-6-1.942E-9*T+9.655E-12*T*T)*(T-20))
-#        a=0.45234E-9*y
-#        b=0.50883E-9*y
-#        c=0.67426E-9*y
-#        VCementite=a*b*c
-#        return VCementite
-        
-#    @jit(nopython=True)   
-    def C_in_gama (timestep, current_dn_alpha, dn_alpha, C_dn, N_total, N_product, temp_fit, ID_dn): #amount of C in gama on the timestep point
-        C_total_in_ferrite=sum(dn_alpha[:timestep-1]*L(C_dn[:timestep-1]))+current_dn_alpha*L(C_dn[timestep-1]) #this calculates total number of C atoms in ferrite phase
-        if ID_dn[timestep-1][3:6] == "Cem":
-            current_dn_cem=((N_total-N_product[timestep-1])*(L(C_in_aus_molefraction[timestep-1])-L(Solubility_aus_cement(temp_fit[timestep]))) - current_dn_alpha*(L(C_dn[timestep-1])-L(Solubility_aus_cement(temp_fit[timestep]))))/(L(0.25)-L(Solubility_aus_cement(temp_fit[timestep])))
-        else:
-            current_dn_cem = 0
-        C_total_in_cement=sum(dn_cement[:timestep-1] + current_dn_cem) / 3.0
-        N_gama=N_total - (N_product[timestep-1] + current_dn_alpha + current_dn_cem)
-        C_in_gama_local = L(C0) * N_total - C_total_in_ferrite - C_total_in_cement #No. of C atoms in aus.
-        return C_in_gama_local/(N_gama+C_in_gama_local)
-    
-    def fundamental_parameters(x):
-        N_t=x
-        modeled_l_gama = ( (N_t / 4) * Vgama (C0, temp_analysis_aus)) ** (1/3)
-        residual_gama=np.sum(np.abs(modeled_l_gama-(dil_analysis_aus+L0)))
-        err=residual_gama
-        return err
-
-    x0=[3e22]#initial estimate of x0 (here it represents N_t) is very important. Too big of number will give error.
-    for i in range(3):
-        res = scipy.optimize.minimize(fundamental_parameters,x0, method='Nelder-Mead')
-        x0= res.x
-    N_total=x0[0]
-    
-    
-    
-    print ('N_total of %s=%s'%(filename,N_total))
-#    print 'CTE_0_gama of %s=%s'%(filename,CTE_0_gama)
-#    print
- 
-#    raw_input('Hit enter to begin fitting points')
-
-# TODO all these polynomial fittings should happen out of fitter for speed gain
-    time_fit=np.zeros((row_max-row_min-2*sr)//interval)
-    temp_fit=np.zeros((row_max-row_min-2*sr)//interval)
-    dil_fit=np.zeros((row_max-row_min-2*sr)//interval)
-#    dldt_fit=np.zeros((row_max-row_min-2*sr)//interval)
-    num_of_analized_points=len(time_fit)
-
-    n=sr
-    for i in range(num_of_analized_points):
-        #print'i= ',i
-        time_fit[i]=time_analysis[n]
-        coef1= P.polyfit(time_analysis[n-sr:n+sr],temp_analysis[n-sr:n+sr],reg_order)
-        temp_fit[i]=P.polyval(time_analysis[n],coef1)
-        coef1= P.polyfit(time_analysis[n-sr:n+sr],dil_analysis[n-sr:n+sr],reg_order)
-        dil_fit[i]=P.polyval(time_analysis[n],coef1)
-        n=n+interval
-
-
-    def expm_l_individual_err(x):
-        previ_alpha_v=0.0
-        current_step_alpha=0.0
-        previ_cem_v=0.0
-        current_step_cem=0.0
-        dn_cem=0.0
-        for j in range(i-1): #This for loop calculates volume of all the previous steps. i-1 is correct
-            if ID_dn[j][0:2]=="PF":
-                previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Valpha(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte,c_wf_for_a0, MF_to_WP)
-            if ID_dn[j][0:2]==("BF"):
-                previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Vbainite(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-
-            if ID_dn[j][0:2]==("MS"):
-                previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Vbainite(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-  
-            if ID_dn[j][3:6]=="Cem":
-                previ_cem_v=previ_cem_v+dn_cement[j]/12*VCement(temp_fit[j])
-        if ID_dn[i-1][0:2]=="PF":
-            current_step_alpha=x/2*Valpha(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-        if ID_dn[i-1][0:2]==("BF"):
-            current_step_alpha=x/2*Vbainite(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-       
-        if ID_dn[i-1][0:2]==("MS"):
-            current_step_alpha=x/2*Vbainite(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-  
-        
-        if ID_dn[i-1][3:6]=="Cem":
-            AA=L(Solubility_aus_cement(temp_fit[i]))
-            dn_cem=((N_total-N_product[i-1])*(AA-L(C_in_aus_molefraction[i-1]))+x*(L(C_dn[i-1])-AA))/(-1/3.0+AA)
-            current_step_cem=dn_cem/12*VCement(temp_fit[i]) #12 iron atoms in one unit cell of cementite.
-        current_gama_v=(N_total-sum(dn_alpha[:i-1])-x-sum(dn_cement[:i-1])-dn_cem)/4*Vgama(C_in_gama(i,x,dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn),temp_fit[i]) #Vgama should be fixed to get rid of x/N_total
-        modeled_V=previ_alpha_v+previ_cem_v+current_step_alpha+current_step_cem+current_gama_v
-        err=abs((dil_fit[i]+L0)**3-modeled_V)*10e19
-        return err
-        
-    def expm_l_individual(x,i):
-        previ_alpha_v=0.0
-        current_step_alpha=0.0
-        previ_cem_v=0.0
-        current_step_cem=0.0
-        dn_cem=0.0
-        for j in range(i-1): #This for loop calculates volume of all the previous steps. i-1 is correct
-            if ID_dn[j][0:2]=="PF":
-                previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Valpha(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-            if ID_dn[j][0:2]==("BF"):
-                previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Vbainite(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-            
-            if ID_dn[j][0:2]==("MS"):
-                previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Vbainite(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-      
-            
-            if ID_dn[j][3:6]=="Cem":
-                previ_cem_v=previ_cem_v+dn_cement[j]/12*VCement(temp_fit[j])
-        if ID_dn[i-1][0:2]=="PF":
-            current_step_alpha=x/2*Valpha(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-        if ID_dn[i-1][0:2]==("BF"):
-            current_step_alpha=x/2*Vbainite(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-        
-        if ID_dn[i-1][0:2]==("MS"):
-            current_step_alpha=x/2*Vbainite(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-   
-        
-        if ID_dn[i-1][3:6]=="Cem":
-            AA=L(Solubility_aus_cement(temp_fit[i]))
-            dn_cem=((N_total-N_product[i-1])*(AA-L(C_in_aus_molefraction[i-1]))+x*(L(C_dn[i-1])-AA))/(-1/3.0+AA)            
-            current_step_cem=dn_cem/12*VCement(temp_fit[i]) #12 iron atoms in one unit cell of cementite.
-        current_gama_v=(N_total-sum(dn_alpha[:i-1])-x-sum(dn_cement[:i-1])-dn_cem)/4*Vgama(C_in_gama(i,x,dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn),temp_fit[i]) #Vgama should be fixed to get rid of x/N_total
-        modeled_V=previ_alpha_v+previ_cem_v+current_step_alpha+current_step_cem+current_gama_v
-        #print (raw_input('press any key to continue in individual loop'))
-        return (modeled_V)**(1/3.0)
-        
-    dn_alpha=np.ones(len(temp_fit))*10**(np.log10(N_total)-4) #this is the starting point of calculation which is close enough to zero to be considered zero fraction transformed, yet large enough to allow for optimization.
-    dn_cement=np.zeros(len(temp_fit))
-    #C_dn_alpha=abs((C_in_alpha((temp_fit[:-1]+temp_fistart=time.time()t[1:])/2))) #This is the C mole fraction associated with each dn
-    C_dn=np.zeros(len(temp_fit))
-    ID_dn=[]
-    #print (raw_input('press any key to continue'))
-    simulated_l=np.zeros(len(dn_alpha))
-    C_in_aus=np.ones(len(dn_alpha))*C0
-    C_in_aus_molefraction=np.ones(len(dn_alpha))*C0
-#    CTE_aus_current=np.zeros(len(dn_alpha))
-    N_product=np.zeros(len(temp_fit))
-#    N_prod=np.zeros(len(temp_fit))
-
-    for j in range(1):
-        #print '******************'
-        i=1 # start filling dn_alpha from the third element since the first two should be zero. the first
-        for i in range(1,num_of_analized_points):
-            T=(temp_fit[i-1]+temp_fit[i])/2
-
-#            print i, "out of", len(temp_fit)-1 ,"points completed"
-            # at every i we calculated the dn[i-1]
-
-            # First we shoud determine what is the type of the product forming between i-1 and i. 
-            # We do that by assuming C_in_austenite during current step is equal to that of the last step.
-            if i>1:
-                if temp_fit[i-1]<Ms(C_in_aus[i-1]):
-                    ID_dn.append("MS")                    
-                elif temp_fit[i-1]<Bs(C_in_aus[i-1]):
-#                    print "   Bainite forming according to empirical formula"
-                    ID_dn.append("BF")
-                else:
-                    ID_dn.append("PF")
-
-                if ID_dn[i-1][0:2]=="PF":
-                    C_dn[i-1]=C_in_alpha(T)
-                    if C_dn[i-1]>C_in_gama(i-1,dn_alpha[i-1],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn):
-                        C_dn[i-1]=C_in_gama(i-1,dn_alpha[i-1],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
-                elif ID_dn[i-1][0:2]=="BF":
-                    C_eq=C_in_alpha(T)
-                    C_dn[i-1]=Bainite_ss_factor(T,C_in_gama(i-1,dn_alpha[i-1],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn))*(C_in_gama(i-1,dn_alpha[i-1],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)-C_eq)+C_eq
-                    if C_dn[i-1]>C_in_gama(i-1,dn_alpha[i-1],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn):
-                        C_dn[i-1]=C_in_gama(i-1,dn_alpha[i-1],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
-                elif ID_dn[i-1][0:2]=="MS":
-                    C_dn[i-1]=C_in_gama(i-1,dn_alpha[i-1],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
-                    
-                if ('yes' or 'y') in file_list[k][6].lower() and ID_dn[i-1]!="MS" and C_in_gama(i-1,dn_alpha[i-1],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)>Solubility_aus_cement(temp_fit[i-1]):
-                    ID_dn[i-1]=ID_dn[i-1]+"+"+"Cem"
-                elif (("user" in file_list[k][6].lower()) and ID_dn[i-1]!="MS" and (C_in_gama(i-1,dn_alpha[i-1],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)>Solubility_aus_cement(temp_fit[i-1]))):
-                    LCT=[float(s) for s in file_list[k][7].split() if s.isdigit()][0]#LCT stands for Lowest cementite tempereature
-                    if T>LCT:
-                        ID_dn[i-1]=ID_dn[i-1]+"+"+"Cem"
-
-            elif i==1:
-                ID_dn.append("PF")
-                C_dn[i-1]=C_in_alpha((temp_fit[i-1]+temp_fit[i])/2)
-            else:
-                print ("There is a problem with ID_dn")
-                quit()
-
-            res=scipy.optimize.minimize(expm_l_individual_err, dn_alpha[i-1], method='nelder-mead', options={})
-            K=res.x
-            dn_alpha[i-1]=K[0]
-#            if "MS" in ID_dn:
-#                print "right after calcs: ",dn_alpha[i-1]            
-            
-            
-            #lets put a constraint on dn to control noise which result in incorrect negative dn            
-            if ((dn_alpha[i-1])/N_total)<1e-3:
-                dn_alpha[i-1]=0
-                
-            if ID_dn[i-1][3:6]=="Cem":
-                AA=L(Solubility_aus_cement(temp_fit[i]))
-                dn_cement[i-1]=((N_total-N_product[i-1])*(-L(C_in_aus_molefraction[i-1])+AA)+dn_alpha[i-1]*(L(C_dn[i-1])-AA))/(-1/3.0+AA)
-                
-#            if "MS" in ID_dn:
-#                print dn_alpha[i-1]
-#        
-            N_product[i]=N_product[i-1]+dn_alpha[i-1]+dn_cement[i-1]
-            #print (raw_input('press any key to go to next point in main loop'))
-            simulated_l[i]= expm_l_individual(dn_alpha[i-1],i)
-
-            C_in_aus[i]=C_in_gama(i,dn_alpha[i-1],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
-            C_in_aus_molefraction[i]=C_in_gama(i,dn_alpha[i-1],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
-
-
-    no_end_points=int((row_max_fer-row_min_fer)//interval)
-    coef= P.polyfit(temp_fit[len(temp_fit)-no_end_points:],N_product[len(temp_fit)-no_end_points:],1)
-    err_end_slope=(5+abs(coef[1]/N_total))**err_end_slop_WF-5**err_end_slop_WF
-    # err_end_fit issues error when fit is not good at the ferrite end. sometimes ferrite end has fewer point that makes them less effective in overal error. 
-    # separeting them allows for increasing there value in overal error 
-    err_end_fit=(5+sum(abs((dil_fit[len(temp_fit)-no_end_points:]+L0)-simulated_l[len(temp_fit)-no_end_points:]))/L0)**end_fit_WF-5**end_fit_WF
-    err_end_fraction=float(0.0)# this issues error if end fraction goes above 1
-    Numer_of_high_point=int(0)
-    for i in range(len(temp_fit)//3,len(temp_fit)): 
-#        print i
-#        print "len(temp_fit)",len(temp_fit)
-        if N_product[i]>N_total:
-            Numer_of_high_point+=1
-            err_end_fraction+=(5+((N_product[i]-N_total)/N_total))**20-5**20
-    
-    if (maximize_fraction_transformed.lower()==('yes'or 'y')):
-        err_maximum_transformation=(5+sum(abs(N_product[:-3]/N_total-1)))**err_maximum_transformation_WF-5**err_maximum_transformation_WF
-    else: err_maximum_transformation=0
-
-    err_overal_fit=(5+sum(abs((dil_fit[1:-1]+L0)-simulated_l[1:-1]))/L0)**overal_fit_WF-5**overal_fit_WF
-#    print 'err_pure_phase=' ,err_pure_phase
-#    print "err_alpha_fit",err_alpha_fit
-    total_cost= err_overal_fit+ err_end_slope + err_end_fraction + err_end_fit + err_maximum_transformation
-#    err_overal_fit=err_alpha_fit
-
-
-    output.put([total_cost,Bs_temp_dic,Ms_temp_dic,MF_temp_dic,C_in_alpha_temp_dic])#+err_pure_phase)#+err_gama_fit+err_alpha_fit)
-
-def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,c_wf_for_cte, c_wf_for_a0):
-    print ('----------V10_plot-------------')
-
-    N_total=0
-    k=0
-    for var in file_list:
-        if var[0]==filename:
-            break
-        else:
-            k+=1
-#    print "k=", k
-    L0=file_list[k][5]+L0_correction[k]
-    time=np.array(time_master[k])
-    temperature=np.array(temp_master[k])
-    dilation=np.array(dil_master[k])
-
     # determine pure austenite range
     row_min_aus=int(file_list[k][1])
     row_max_aus=int(file_list[k][2])
@@ -947,70 +970,11 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
     dil_analysis=dilation[row_min:row_max+1]
     temp_analysis=temperature[row_min:row_max+1]
 
-#
-    def C_in_alpha(T): #Mole fraction of C in alpha using thermocalc under para equilibrium
-        C= 1.4734491E-20*T**6 + 3.9638142E-17*T**5 - 1.1293268E-13*T**4 + 6.8406210E-11*T**3 - 9.3489472E-09*T**2 + 6.1810195E-07*T - 6.3920771E-06
-        return abs(C)
+##
+#    def C_in_alpha(T): #Mole fraction of C in alpha using thermocalc under para equilibrium
+#        C= 1.4734491E-20*T**6 + 3.9638142E-17*T**5 - 1.1293268E-13*T**4 + 6.8406210E-11*T**3 - 9.3489472E-09*T**2 + 6.1810195E-07*T - 6.3920771E-06
+#        return abs(C)
 
-        
-    def Vgama_param(a0_gama,CTE_0_gama,T):
-        Vgama=((a0_gama+6.5e-4*1e-9*C0*100)*(1+(CTE_0_gama-0.5E-6*C0*100)*(T-726.85)))**3
-        return Vgama
-    
-    def Vgama_new (CTE_0_gama,C,T): # check if C is mole fraction
-        Vgama=((a0_gama+6.5e-4*1e-9*C*100)*(1+(CTE_0_gama-0.5E-6*C*100)*(T-726.85)))**3
-        return Vgama
-
-    
-
-#    
-    def C_in_gama(timestep, current_dn_alpha, dn_alpha, C_dn, N_total, N_product, temp_fit, ID_dn): #amount of C in gama on the timestep point in mole fraction
-    #    print "From C_in _gama,current_dn_alpha is ", current_dn_alpha
-        C_total_in_ferrite=sum(dn_alpha[:timestep-1]*L(C_dn[:timestep-1]))+current_dn_alpha*L(C_dn[timestep-1]) #this calculates total number of C atoms in ferrite phase
-        if ID_dn[timestep-1][3:6]=="Cem":
-            current_dn_cem=((N_total-N_product[timestep-1])*(L(C_in_aus_molefraction[timestep-1])-L(Solubility_aus_cement(temp_fit[timestep])))-current_dn_alpha*(L(C_dn[timestep-1])-L(Solubility_aus_cement(temp_fit[timestep]))))/(L(0.25)-L(Solubility_aus_cement(temp_fit[timestep])))
-        else:
-            current_dn_cem=0
-    #    print "dn_cem =" , dn_cem
-        C_total_in_cement=sum(dn_cement[:timestep-1]/3.0)+current_dn_cem/3.0
-        N_gama=N_total-(N_product[timestep-1]+current_dn_alpha+current_dn_cem)
-        C_in_gama_local=L(C0)*N_total-C_total_in_ferrite-C_total_in_cement #No. of C atoms in aus.
-        return C_in_gama_local/(N_gama+C_in_gama_local)
-    
-    def fundamental_parameters(x):
-        N_t=x
-
-        modeled_l_gama=((N_t/4)*Vgama_param(a0_gama,CTE_0_gama,temp_analysis_aus))**(1/3.0)
-        residual_gama=np.sum(np.abs(modeled_l_gama-(dil_analysis_aus+L0)))
-        err=residual_gama
-        return err
-
-    x0=[8.5e22]#,a0_gama,CTE_0_gama,CTE_alpha_b,CTE_alpha_a]
-    for i in range(5):
-        res = scipy.optimize.minimize(fundamental_parameters,x0, method='Nelder-Mead')
-        x0= res.x
-    N_total=x0[0]
-    
-    print ('N_total of %s=%s'%(filename,N_total))
-    print ('CTE_0_gama of %s=%s'%(filename,CTE_0_gama))
-    print
-#    raw_input('Hit enter to begin fitting points')
-
-    simulated_aus=np.zeros(len(temp_analysis))
-    for i in range (0, len(temp_analysis)):
-        simulated_aus[i]= (N_total/4*Vgama_new(CTE_0_gama,C0,temp_analysis[i]))**(1/3.0)
-
-    plt.figure(7,figsize=(8,6))
-    plt.plot(temp_analysis,1e3*(dil_analysis+L0),'.', label="experimental data -" + filename)
-    plt.legend(loc=2)
-    plt.title('Fit of austenite')
-    plt.plot(temp_analysis,1e3*simulated_aus, '-',label="Fitted austenite - " + filename)
-    plt.xlabel('Temperature$(\\degree C)$')
-    plt.ylabel('Specimen length $(mm)$')
-    plt.legend(loc=2)
-    plt.grid()    
-    
-    
     time_fit=np.zeros((row_max-row_min-2*sr)//interval)
     temp_fit=np.zeros((row_max-row_min-2*sr)//interval)
     dil_fit=np.zeros((row_max-row_min-2*sr)//interval)
@@ -1026,6 +990,43 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
         coef1= P.polyfit(time_analysis[n-sr:n+sr],dil_analysis[n-sr:n+sr],reg_order)
         dil_fit[i]=P.polyval(time_analysis[n],coef1)
         n=n+interval
+        
+    def Vgama (C,T):
+        return ((a0_gama + 6.5e-4 * 1e-9 * C * 100) * (1 + (CTE_0_gama - 0.5E-6 * C * 100) * (T-726.85)))**3
+        
+  
+    def C_in_gama(timestep,current_dn_alpha,dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn): #amount of C in gama on the timestep point
+        C_total_in_ferrite=sum(dn_alpha[:timestep-1]*L(C_dn[:timestep-1]))+current_dn_alpha*L(C_dn[timestep-1]) #this calculates total number of C atoms in ferrite phase
+        if ID_dn[timestep-1][3:6]=="Cem":
+            current_dn_cem=((N_total-N_product[timestep-1])*(L(C_in_aus_molefraction[timestep-1])-L(Solubility_aus_cement(temp_fit[timestep])))-current_dn_alpha*(L(C_dn[timestep-1])-L(Solubility_aus_cement(temp_fit[timestep]))))/(L(0.25)-L(Solubility_aus_cement(temp_fit[timestep])))
+        else:
+            current_dn_cem=0
+        C_total_in_cement=sum(dn_cement[:timestep-1]/3.0)+current_dn_cem/3.0
+        N_gama=N_total-(N_product[timestep-1]+current_dn_alpha+current_dn_cem)
+        C_in_gama_local=L(C0)*N_total-C_total_in_ferrite-C_total_in_cement #No. of C atoms in aus.
+        return C_in_gama_local/(N_gama+C_in_gama_local)
+    
+    def fundamental_parameters(x):
+        N_t=x
+        modeled_l_gama=((N_t/4)*Vgama(C0,temp_analysis_aus))**(1/3.0)
+        residual_gama=np.sum(np.abs(modeled_l_gama-(dil_analysis_aus+L0)))
+        err=residual_gama
+        return err
+
+    x0=[5e22]#,a0_gama,CTE_0_gama,CTE_alpha_b,CTE_alpha_a]
+    for i in range(3):
+        res = scipy.optimize.minimize(fundamental_parameters,x0, method='Nelder-Mead')
+        x0= res.x
+    N_total=x0[0]
+    
+    print ('N_total of %s=%s'%(filename,N_total))
+    print ('CTE_0_gama of %s=%s'%(filename,CTE_0_gama))
+#    print
+#    input('Hit enter to begin fitting points')
+
+    
+    
+
 
 
     def expm_l_individual_err(x):
@@ -1055,15 +1056,13 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
        
         if ID_dn[i-1][0:2]==("MS"):
             current_step_alpha=x/2*Vbainite(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-  
-   
 
         if ID_dn[i-1][3:6]=="Cem":
             AA=L(Solubility_aus_cement(temp_fit[i]))
             dn_cem=((N_total-N_product[i-1])*(AA-L(C_in_aus_molefraction[i-1]))+x*(L(C_dn[i-1])-AA))/(-1/3.0+AA)
 #            dn_cem=(1/(1/3.0-L(Solubility_aus_cement(temp_fit[i]))))*((dn_alpha[:i-1]*C_dn[:i-1])+(np.sum(dn_cem[:i-1])/3.0)+(N_total-N_product[i])*L(Solubility_aus_cement(temp_fit[i]))+x*(L(C_in_alpha((temp_fit[i]+temp_fit[i-1])/2.0)))-N_total*(L(C0)))
             current_step_cem=dn_cem/12*VCement(temp_fit[i]) #12 iron atoms in one unit cell of cementite.
-        current_gama_v=(N_total-sum(dn_alpha[:i-1])-x-sum(dn_cement[:i-1])-dn_cem)/4*Vgama_new(CTE_0_gama,C_in_gama(i,x,dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn),temp_fit[i]) #Vgama should be fixed to get rid of x/N_total
+        current_gama_v=(N_total-sum(dn_alpha[:i-1])-x-sum(dn_cement[:i-1])-dn_cem)/4 *Vgama(C_in_gama(i,x,dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn),temp_fit[i]) 
         modeled_V=previ_alpha_v+previ_cem_v+current_step_alpha+current_step_cem+current_gama_v
         err=abs((dil_fit[i]+L0)**3-modeled_V)*10e19
         return err
@@ -1077,30 +1076,29 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
         for j in range(i-1): #This for loop calculates volume of all the previous steps. i-1 is correct
             if ID_dn[j][0:2]=="PF":
                 previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Valpha(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-
             if ID_dn[j][0:2]==("BF"):
                 previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Vbainite(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
             
             if ID_dn[j][0:2]==("MS"):
                 previ_alpha_v=previ_alpha_v+dn_alpha[j]/2*Vbainite(a0_alpha,C_dn[j],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-    
+      
+            
             if ID_dn[j][3:6]=="Cem":
                 previ_cem_v=previ_cem_v+dn_cement[j]/12*VCement(temp_fit[j])
         if ID_dn[i-1][0:2]=="PF":
             current_step_alpha=x/2*Valpha(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
-
         if ID_dn[i-1][0:2]==("BF"):
             current_step_alpha=x/2*Vbainite(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
         
         if ID_dn[i-1][0:2]==("MS"):
             current_step_alpha=x/2*Vbainite(a0_alpha,C_dn[i-1],temp_fit[i],CTE_alpha_a,CTE_alpha_b,CTE_alpha_c, c_wf_for_cte, c_wf_for_a0, MF_to_WP)
- 
-
-        if ID_dn[i-1][3:6]=="Cem":         
+   
+        
+        if ID_dn[i-1][3:6]=="Cem":
             AA=L(Solubility_aus_cement(temp_fit[i]))
             dn_cem=((N_total-N_product[i-1])*(AA-L(C_in_aus_molefraction[i-1]))+x*(L(C_dn[i-1])-AA))/(-1/3.0+AA)            
             current_step_cem=dn_cem/12*VCement(temp_fit[i]) #12 iron atoms in one unit cell of cementite.
-        current_gama_v=(N_total-sum(dn_alpha[:i-1])-x-sum(dn_cement[:i-1])-dn_cem)/4*Vgama_new(CTE_0_gama,C_in_gama(i,x,dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn),temp_fit[i]) #Vgama should be fixed to get rid of x/N_total
+        current_gama_v=(N_total-sum(dn_alpha[:i-1])-x-sum(dn_cement[:i-1])-dn_cem)/4*Vgama(C_in_gama(i,x,dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn),temp_fit[i]) #Vgama should be fixed to get rid of x/N_total
         modeled_V=previ_alpha_v+previ_cem_v+current_step_alpha+current_step_cem+current_gama_v
         #print (raw_input('press any key to continue in individual loop'))
         return (modeled_V)**(1/3.0)
@@ -1108,7 +1106,9 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
       
     dn_alpha=np.ones(num_of_analized_points-1)*10**(np.log10(N_total)-4)
     dn_cement=np.zeros(num_of_analized_points-1)
-    lattice_param_gamma_during_trans=np.zeros(num_of_analized_points)
+    
+
+    
     #C_dn_alpha=abs((C_in_alpha((temp_fit[:-1]+temp_fistart=time.time()t[1:])/2))) #This is the C mole fraction associated with each dn
     C_dn=np.zeros(num_of_analized_points-1)
     ID_dn=[]
@@ -1120,10 +1120,15 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
     N_product=np.zeros(num_of_analized_points)
 #    N_prod=np.zeros(num_of_analized_points)
 
+
+
+    
+    ###########################different from fitter#############
+    lattice_param_gamma_during_trans=np.zeros(num_of_analized_points)
     Vol_dn_alpha_at_20=np.zeros(num_of_analized_points-1)
     Vol_dn_cem_at_20=np.zeros(num_of_analized_points-1)
     Vol_transformed=np.zeros(num_of_analized_points-1)
-    
+    ###########################different from fitter#############
     for j in range(1):
         #print '******************'
 #        i=1 # start filling dn_alpha from the third element since the first two should be zero. the first
@@ -1189,7 +1194,7 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
             simulated_l[i]= expm_l_individual(dn_alpha[ii],i)
 #            print i
             C_in_aus[i]=C_in_gama(i,dn_alpha[ii],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
-            lattice_param_gamma_during_trans[i]=(Vgama_new(CTE_0_gama,C_in_aus[i],temp_fit[i]))**(1/3.0)
+            lattice_param_gamma_during_trans[i]=(Vgama(C_in_aus[i],temp_fit[i]))**(1/3.0)
             C_in_aus_molefraction[i]=C_in_gama(i,dn_alpha[ii],dn_alpha,C_dn,N_total,N_product,temp_fit,ID_dn)
 #            C_in_aus[i]= mf_to_wp(C)
             C_total_in_ferrite=sum(dn_alpha[:i]*L(C_dn[:i]))
@@ -1203,7 +1208,7 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
             print ("    C balance (should be 1)= ", C_balance)
 #            print "    dil_fit = ", dil_fit[i]
             print ("----------------------------------")
-    Vol_retained_aus_at_20=(N_total-N_product[-1])/4* Vgama_new(CTE_0_gama,C_in_aus[i],20)
+    Vol_retained_aus_at_20=(N_total-N_product[-1])/4* Vgama(C_in_aus[i],20)
     Total_vol=np.sum(Vol_dn_alpha_at_20) + np.sum(Vol_dn_cem_at_20) + Vol_retained_aus_at_20
     for i in range(len(Vol_dn_alpha_at_20)):
         Vol_transformed[i]=np.sum(Vol_dn_alpha_at_20[0:i])+np.sum(Vol_dn_cem_at_20[0:i])
@@ -1215,7 +1220,24 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
     f=N_product/N_total
     
     
-    
+############################################
+# different from fitter
+
+
+    simulated_aus=np.zeros(len(temp_analysis))
+    for i in range (0, len(temp_analysis)):
+        simulated_aus[i]= (N_total/4*Vgama(C0,temp_analysis[i]))**(1/3.0)
+
+    plt.figure(7,figsize=(8,6))
+    plt.plot(temp_analysis,1e3*(dil_analysis+L0),'.', label="experimental data -" + filename)
+    plt.legend(loc=2)
+    plt.title('Fit of austenite')
+    plt.plot(temp_analysis,1e3*simulated_aus, '-',label="Fitted austenite - " + filename)
+    plt.xlabel('Temperature$(\\degree C)$')
+    plt.ylabel('Specimen length $(mm)$')
+    plt.legend(loc=2)
+    plt.grid()    
+
     
     plt.figure(8,figsize=(8,7))
     plt.subplot(211)
@@ -1235,25 +1257,7 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
     plt.legend()
     plt.grid()
 
-#    plt.figure(44,figsize=(8,7))
-#    plt.plot(temp_analysis,dil_analysis+L0,'.',label= 'Experimental '+ dataname)
-#    plt.xlabel('Temperature $(\\degree C)$')
-#    plt.ylabel('Sample length $(m)$')
-#    plt.grid()
-##    C=np.polynomial.chebyshev.chebfit(temp_analysis[50:-50],dil_analysis[50:-50]+L0,5)
-##    fitted=np.polynomial.chebyshev.chebval(temp_analysis[50:-50],C)
-#    
-##    C=np.polynomial.legendre.legfit(temp_analysis[10:-50],dil_analysis[10:-50]+L0,50)
-##    fitted=np.polynomial.legendre.legval(temp_analysis[10:-50],C)
-#    
-##    C=np.polynomial.laguerre.lagfit(temp_analysis[10:-50],dil_analysis[10:-50]+L0,30)
-##    fitted=np.polynomial.laguerre.lagval(temp_analysis[10:-50],C)
-#    
-#    C=np.polynomial.hermite.hermfit(temp_analysis[10:-50],dil_analysis[10:-50]+L0,30)
-#    fitted=np.polynomial.hermite.hermval(temp_analysis[10:-50],C)
-#    
-#    plt.plot(temp_analysis[10:-50],fitted,'-',label= 'Chebyshev Approximation '+ dataname)
-#    print ("end")
+
     
     result_master_time.append(time_fit)
     result_master_temp.append(temp_fit)
@@ -1270,7 +1274,7 @@ def Fitter_plot(filename,output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_a
     result_master_FD_vol.append(Vol_dn_alpha_at_20/Total_vol)#calculates volume fraction of FD at 20C
     result_master_cem_vol.append(Vol_dn_cem_at_20/Total_vol)#calculates volume of the phase at 20C
     result_master_aus_vol.append(vol_f_retained_aus)#calculates volume of the phase at 20C    
-
+############################################    
 
 def master_fiter(x):
     print ('-'*49)
@@ -1291,12 +1295,12 @@ def master_fiter(x):
     results = [output.get() for p in processes]
 #    print results
     err=0
-    for i in range(len(results)):
-        err+=results[i][0]
-        Bs_master_dic.update(results[i][1])
-        Ms_master_dic.update(results[i][2])
-        MF_dic.update(results[i][3])
-        C_in_alpha_master_dic.update(results[i][4])
+    for result in results:
+        err+=result[0]
+        Bs_master_dic.update(result[1])
+        Ms_master_dic.update(result[2])
+        MF_dic.update(result[3])
+        C_in_alpha_master_dic.update(result[4])
     print ('err=         ' ,"%.30e" %err)
     return err
 x0_param_names=[]
@@ -1341,7 +1345,7 @@ if __name__=='__main__':
     
     
     for k in range(len(file_list)):
-        Fitter_plot(file_list[k][0],output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,c_wf_for_cte,c_wf_for_a0)
+        Fitter(file_list[k][0],output,a0_gama,CTE_alpha_a,CTE_alpha_b,CTE_alpha_c,a0_alpha,c_wf_for_cte,Bs_master_dic, MF_dic, Ms_master_dic,C_in_alpha_master_dic, run_mode = 'plot')
     print ("*-"*25)
     print ('a0_gama =    ' ,"%.30e" %a0_gama)
     print ('a0_alpha=    ' ,"%.30e" %a0_alpha)
