@@ -137,11 +137,12 @@ global err_maximum_transformation_WF, Bs_master_dic, Ms_master_dic, MF_dic
 ################################
 #solver settings
 
-optimize='no'# It tells the program to optimize or just plot using the parameters provided.yes / no
+optimize='yes'# It tells the program to optimize or just plot using the parameters provided.yes / no
 show_plots='no'
 open_excel_result='no'
 interval=8
 
+aus_fit_WF = 3
 end_fit_WF=1
 overal_fit_WF=7
 err_end_slop_WF=1
@@ -191,7 +192,7 @@ optimized_param_bounds={'a0_gama':     (3.63e-10*0.98,3.63e-10*1.02),
                         'c_wf_for_cte':(1.96e-4,8.96e-3), 
                         'c_wf_for_a0': (4.53e-11,9.53e-12)}
 #
-                       
+precision=4 # This is a number of decimal points used in rounding carbon content for Ms and Bs calculation.                       
                         
 #compile_C_library=1
 #################################
@@ -289,6 +290,13 @@ with open('chemistry.csv','r') as c:
 chemistry0=dict(zip(elements,amount0_wp))
 chemistry0_temp=dict(zip(elements,amount0_wp))# this is used in some calculation and altered during the process. Should not be used for anything. use chemistry0 instead.
 #def molar_fraction(elements,amounts_wp,req
+
+Mn= chemistry0['mn']
+Ni= chemistry0['ni']
+Cr= chemistry0['cr']
+Mo= chemistry0['mo']
+Si= chemistry0['si']
+Cu= chemistry0['cu']
 
 for elm in molar_weight.keys():
     if elm not in chemistry0.keys():
@@ -500,9 +508,9 @@ def calc_L0_correction():
 
 
 L0_correction = calc_L0_correction()
-CTE_eq_order=1 #Highest power in the CTE polinomial
 
 def product_discriptive_analysis():
+    CTE_eq_order=1 #Highest power in the CTE polinomial
     for i in range(len(file_list)):
         L0=file_list[i][5]+L0_correction[i]
         row_min_fer=int(file_list[i][3])
@@ -534,16 +542,8 @@ def product_discriptive_analysis():
     if use_avr_CTE_product==1:
         CTE_alpha_c=CTE_product_avr_coef[0]
         CTE_alpha_b=CTE_product_avr_coef[1]
-k=0 #k is the number that shows location of the current data file in the file_list
+#k=0 #k is the number that shows location of the current data file in the file_list
 
-Mn= chemistry0['mn']
-Ni= chemistry0['ni']
-Cr= chemistry0['cr']
-Mo= chemistry0['mo']
-Si= chemistry0['si']
-Cu= chemistry0['cu']
-
-precision=4 # This is a number of decimal points used in rounding carbon content for Ms and Bs calculation.
 
 def Bs(C):# C is in mole fraction
 #    print C
@@ -668,7 +668,7 @@ def dataset_preprocess(file_list):
         final[file_name] = [CTE_0_gama, num_of_analized_points,row_min_aus, 
              row_max_aus, row_min_fer, row_max_fer, time_fit, 
              temp_fit, dil_fit, L0, time_analysis, temp_analysis, 
-             dil_analysis, temp_analysis_aus, dil_analysis_aus]
+             dil_analysis, temp_analysis_aus, dil_analysis_aus, k]
     return final
 
 key_data = dataset_preprocess(file_list)       
@@ -678,7 +678,7 @@ def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_
 
     N_total=0
     
-    CTE_0_gama, num_of_analized_points, row_min_aus, row_max_aus, row_min_fer, row_max_fer, time_fit, temp_fit, dil_fit, L0, time_analysis, temp_analysis, dil_analysis, temp_analysis_aus , dil_analysis_aus = key_data[filename]
+    CTE_0_gama, num_of_analized_points, row_min_aus, row_max_aus, row_min_fer, row_max_fer, time_fit, temp_fit, dil_fit, L0, time_analysis, temp_analysis, dil_analysis, temp_analysis_aus , dil_analysis_aus, k = key_data[filename]
 #    if run_mode == 'plot':
 #        *_, time_analysis, temp_analysis, dil_analysis = key_data[filename]
     
@@ -825,8 +825,7 @@ def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_
             quit()
 
         res=scipy.optimize.minimize(expm_l_individual, dn_alpha[ii], args = (i, 'error'), method='nelder-mead', options={})
-        K=res.x
-        dn_alpha[ii]=K[0]     
+        dn_alpha[ii]=res.x[0]     
         
         #lets put a constraint on dn to control noise which result in incorrect negative dn            
         if ((dn_alpha[ii])/N_total)<1e-3:
@@ -862,13 +861,23 @@ def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_
             print ("    C balance (should be 1)= ", C_balance)
     #            print "    dil_fit = ", dil_fit[i]
             print ("----------------------------------")
-
+    
+    def err_amplify(err, err_WF):
+        return (5+abs(err))**err_WF-5**err_WF
+    
     if run_mode == 'fit':
+        aus_fit_err = np.sum(dn_alpha[:(row_max_aus-row_max_aus)])/N_total
+        aus_fit_err = err_amplify(aus_fit_err , aus_fit_WF)
+        aus_fit_err = 0
+        
         no_end_points=(row_max_fer-row_min_fer)//interval
         coef= P.polyfit(temp_fit[len(temp_fit)-no_end_points:],N_product[len(temp_fit)-no_end_points:],1)
-        err_end_slope=(5+abs(coef[1]/N_total))**err_end_slop_WF-5**err_end_slop_WF
+#        err_end_slope=(5+abs(coef[1]/N_total))**err_end_slop_WF-5**err_end_slop_WF
+        err_end_slope = err_amplify(coef[1]/N_total ,err_end_slop_WF )
         # err_end_fit issues error when fit is not good at the ferrite end. sometimes ferrite end has fewer point that makes them less effective in overal error. 
         # separeting them allows for increasing there value in overal error 
+#        err_end_fit = (dil_fit[len(temp_fit)-no_end_points:]+L0)-simulated_l[len(temp_fit)-no_end_points:]
+#        err_end_fit = err_amplify(err_end_fit , end_fit_WF)
         err_end_fit=(5+sum(abs((dil_fit[len(temp_fit)-no_end_points:]+L0)-simulated_l[len(temp_fit)-no_end_points:]))/L0)**end_fit_WF-5**end_fit_WF
         err_end_fraction=0# this issues error if end fraction goes above 1
         Numer_of_high_point=int(0)
@@ -886,7 +895,7 @@ def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_
         err_overal_fit=(5+sum(abs((dil_fit[1:-1]+L0)-simulated_l[1:-1]))/L0)**overal_fit_WF-5**overal_fit_WF
     #    print 'err_pure_phase=' ,err_pure_phase
     #    print "err_alpha_fit",err_alpha_fit
-        total_cost= err_overal_fit+ err_end_slope + err_end_fraction + err_end_fit + err_maximum_transformation
+        total_cost= aus_fit_err+ err_overal_fit+ err_end_slope + err_end_fraction + err_end_fit + err_maximum_transformation
     #    err_overal_fit=err_alpha_fit
     
     
