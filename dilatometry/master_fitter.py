@@ -98,7 +98,7 @@ email the author at: khodaie@ualberta.ca or nassehk@gmail.com.
 This code is distributed under MIT license. Update, upgrade, fix and share.
 """
 __author__= "Nasseh Khodaie"
-__version__=3.00
+__version__=3.10
 #import cProfile 
 #def main():
 import pandas as pd
@@ -137,7 +137,7 @@ global err_maximum_transformation_WF, Bs_master_dic, Ms_master_dic, MF_dic
 ################################
 #solver settings
 
-optimize='yes'# It tells the program to optimize or just plot using the parameters provided.yes / no
+optimize='no'# It tells the program to optimize or just plot using the parameters provided.yes / no
 show_plots='no'
 open_excel_result='no'
 interval=8
@@ -502,37 +502,38 @@ def calc_L0_correction():
 L0_correction = calc_L0_correction()
 CTE_eq_order=1 #Highest power in the CTE polinomial
 
-for i in range(len(file_list)):
-    L0=file_list[i][5]+L0_correction[i]
-    row_min_fer=int(file_list[i][3])
-    row_max_fer=int(file_list[i][4])
-
-    dil_analysis_fer=dil_master[i][row_min_fer:row_max_fer+1]
-    temp_analysis_fer=temp_master[i][row_min_fer:row_max_fer+1]
-    CTE_product_coef=P.polyder(P.polyfit(temp_analysis_fer,dil_analysis_fer,CTE_eq_order+1))/L0
-    CTE_product_master.append(CTE_product_coef)
-
-CTE_temp=[]
-temperature_temp=[]
-
-plt.figure(figsize=(8,6)) 
-plt.title("CTE product") 
-for i in range(len(file_list)):
-    print (i , "   " , i)
-    temp=np.arange(np.round(temp_master[i][int(file_list[i][4])]),np.round(temp_master[i][int(file_list[i][3])]))
-    CTE=P.polyval(temp,CTE_product_master[i])     
-    plt.plot(temp,1e5*CTE,'.',label=file_list[i][0])
-    CTE_temp=CTE_temp+list(CTE)
-    temperature_temp=temperature_temp+list(temp)
+def product_discriptive_analysis():
+    for i in range(len(file_list)):
+        L0=file_list[i][5]+L0_correction[i]
+        row_min_fer=int(file_list[i][3])
+        row_max_fer=int(file_list[i][4])
     
-CTE_product_avr_coef=P.polyfit(temperature_temp,CTE_temp,CTE_eq_order)
-plt.plot(range(100,500),1e5*P.polyval(list(range(100,500)),CTE_product_avr_coef),"--",label='Average CTE')
-plt.legend()
-plt.xlabel('Temperature $(\degree C)$')
-plt.ylabel('CTE$ \\times 10^5$ $({\degree C}^{-1})$')
-if use_avr_CTE_product==1:
-    CTE_alpha_c=CTE_product_avr_coef[0]
-    CTE_alpha_b=CTE_product_avr_coef[1]
+        dil_analysis_fer=dil_master[i][row_min_fer:row_max_fer+1]
+        temp_analysis_fer=temp_master[i][row_min_fer:row_max_fer+1]
+        CTE_product_coef=P.polyder(P.polyfit(temp_analysis_fer,dil_analysis_fer,CTE_eq_order+1))/L0
+        CTE_product_master.append(CTE_product_coef)
+    
+    CTE_temp=[]
+    temperature_temp=[]
+    
+    plt.figure(figsize=(8,6)) 
+    plt.title("CTE product") 
+    for i in range(len(file_list)):
+        print (i , "   " , i)
+        temp=np.arange(np.round(temp_master[i][int(file_list[i][4])]),np.round(temp_master[i][int(file_list[i][3])]))
+        CTE=P.polyval(temp,CTE_product_master[i])     
+        plt.plot(temp,1e5*CTE,'.',label=file_list[i][0])
+        CTE_temp=CTE_temp+list(CTE)
+        temperature_temp=temperature_temp+list(temp)
+        
+    CTE_product_avr_coef=P.polyfit(temperature_temp,CTE_temp,CTE_eq_order)
+    plt.plot(range(100,500),1e5*P.polyval(list(range(100,500)),CTE_product_avr_coef),"--",label='Average CTE')
+    plt.legend()
+    plt.xlabel('Temperature $(\degree C)$')
+    plt.ylabel('CTE$ \\times 10^5$ $({\degree C}^{-1})$')
+    if use_avr_CTE_product==1:
+        CTE_alpha_c=CTE_product_avr_coef[0]
+        CTE_alpha_b=CTE_product_avr_coef[1]
 k=0 #k is the number that shows location of the current data file in the file_list
 
 Mn= chemistry0['mn']
@@ -664,7 +665,10 @@ def dataset_preprocess(file_list):
             coef1= P.polyfit(time_analysis[n-sr:n+sr],dil_analysis[n-sr:n+sr],reg_order)
             dil_fit[i]=P.polyval(time_analysis[n],coef1)
             n=n+interval
-        final[file_name] = [CTE_0_gama, num_of_analized_points,time_fit, temp_fit, dil_fit, L0, time_analysis, temp_analysis, dil_analysis, temp_analysis_aus, dil_analysis_aus]
+        final[file_name] = [CTE_0_gama, num_of_analized_points,row_min_aus, 
+             row_max_aus, row_min_fer, row_max_fer, time_fit, 
+             temp_fit, dil_fit, L0, time_analysis, temp_analysis, 
+             dil_analysis, temp_analysis_aus, dil_analysis_aus]
     return final
 
 key_data = dataset_preprocess(file_list)       
@@ -674,7 +678,7 @@ def Fitter(filename, output, a0_gama, CTE_alpha_a, CTE_alpha_b, CTE_alpha_c, a0_
 
     N_total=0
     
-    CTE_0_gama, num_of_analized_points, time_fit, temp_fit, dil_fit, L0, time_analysis, temp_analysis, dil_analysis, temp_analysis_aus , dil_analysis_aus = key_data[filename]
+    CTE_0_gama, num_of_analized_points, row_min_aus, row_max_aus, row_min_fer, row_max_fer, time_fit, temp_fit, dil_fit, L0, time_analysis, temp_analysis, dil_analysis, temp_analysis_aus , dil_analysis_aus = key_data[filename]
 #    if run_mode == 'plot':
 #        *_, time_analysis, temp_analysis, dil_analysis = key_data[filename]
     
